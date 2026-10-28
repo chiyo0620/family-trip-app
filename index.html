@@ -4,54 +4,115 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Family Travel Planner</title>
-  
-  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  
-  <!-- React & ReactDOM -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  
-  <!-- Babel (ブラウザでReactを動かすための翻訳機) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans">
-  
-  <!-- アプリが表示される場所 -->
   <div id="root"></div>
 
   <script type="text/babel">
-    // ---------------------------------------------
-    // 【設定エリア】あとでここにAPIキーなどを入れます
-    // ---------------------------------------------
-    const SUPABASE_URL = 'あなたのSupabaseのURL';
-    const SUPABASE_KEY = 'あなたのSupabaseのAPIキー';
-    const GEMINI_API_KEY = 'あなたのGeminiのAPIキー';
+    // ==========================================
+    // 🔑 ここにご自身のキーを貼り付けてください
+    // ==========================================
+    const SUPABASE_URL = 'https://xankyyjojztzubhvrfwx.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhbmt5eWpvanp0enViaHZyZnd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwOTczMjQsImV4cCI6MjEwODY3MzMyNH0.XhjVO7tibCwP9T0RFsPYP5iBLKkx0X3ebxBqnYSIkFM';
+    const GEMINI_API_KEY = 'AQ.Ab8RN6I687fn-8FP-9eotjeo9v7jUAPaeLwdpweFSPgyx9PzGA';
 
-    // ---------------------------------------------
-    // アプリの画面構成（Reactコンポーネント）
-    // ---------------------------------------------
+    // Supabaseの準備
+    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    const { useState, useEffect } = React;
+
     function App() {
+      const [trips, setTrips] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [newTripTitle, setNewTripTitle] = useState('');
+
+      // 画面が開いたときに旅行データを読み込む
+      useEffect(() => {
+        fetchTrips();
+      }, []);
+
+      const fetchTrips = async () => {
+        setLoading(true);
+        const { data, error } = await supabase
+          .from('trips')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (error) console.error('エラー:', error);
+        else setTrips(data || []);
+        setLoading(false);
+      };
+
+      // 新しい旅行を追加する
+      const addTrip = async (e) => {
+        e.preventDefault();
+        if (!newTripTitle) return;
+
+        const { error } = await supabase
+          .from('trips')
+          .insert([{ title: newTripTitle, start_date: new Date().toISOString().split('T')[0] }]);
+
+        if (error) {
+          alert('追加に失敗しました');
+          console.error(error);
+        } else {
+          setNewTripTitle('');
+          fetchTrips(); // 追加後に一覧を再読み込み
+        }
+      };
+
       return (
         <div className="max-w-4xl mx-auto p-4 md:p-8">
-          <div className="bg-white rounded-2xl shadow-xl overflow-hidden text-center p-12 mt-10">
-            <h1 className="text-3xl font-bold text-gray-800 mb-4">🚀 アプリの土台が完成しました！</h1>
-            <p className="text-gray-600 mb-6">
-              React、Tailwind CSS、Supabaseの準備がすべて整った状態の <code>index.html</code> です。<br />
-              次はここに、取得した「APIキー」を設定し、プロトタイプのデザインを組み込んでいきます。
-            </p>
-            <div className="inline-block bg-blue-50 text-blue-700 px-4 py-2 rounded-lg font-medium border border-blue-200">
-              公開URLにアクセスして、この画面が表示されていれば大成功です！
-            </div>
+          <div className="flex justify-between items-center mb-8">
+            <h1 className="text-2xl font-bold text-gray-800">✈️ 家族の旅行一覧</h1>
           </div>
+
+          {/* 新規追加フォーム */}
+          <form onSubmit={addTrip} className="bg-white p-4 rounded-xl shadow-sm mb-8 flex gap-2">
+            <input
+              type="text"
+              placeholder="新しい旅行のタイトル (例: 沖縄旅行 2026)"
+              className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              value={newTripTitle}
+              onChange={(e) => setNewTripTitle(e.target.value)}
+            />
+            <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700">
+              追加
+            </button>
+          </form>
+
+          {/* 旅行リスト */}
+          {loading ? (
+            <p className="text-center text-gray-500">読み込み中...</p>
+          ) : trips.length === 0 ? (
+            <div className="text-center bg-white p-10 rounded-xl shadow-sm">
+              <p className="text-gray-500 mb-2">まだ旅行が登録されていません。</p>
+              <p className="text-sm text-gray-400">上のフォームから最初の旅行を追加してみましょう！</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {trips.map(trip => (
+                <div key={trip.id} className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition">
+                  <h2 className="text-xl font-bold mb-2">{trip.title}</h2>
+                  <p className="text-sm text-gray-500">
+                    登録日: {new Date(trip.created_at).toLocaleDateString('ja-JP')}
+                  </p>
+                  <div className="mt-4 text-right">
+                    <span className="text-blue-600 text-sm font-bold">しおりを開く →</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       );
     }
 
-    // 画面にアプリを描画する
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
