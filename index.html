@@ -9,8 +9,10 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- アイコン用 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body class="bg-gray-100 text-gray-800 font-sans">
+<body class="bg-gray-50 text-gray-800 font-sans">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -21,94 +23,315 @@
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhbmt5eWpvanp0enViaHZyZnd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwOTczMjQsImV4cCI6MjEwODY3MzMyNH0.XhjVO7tibCwP9T0RFsPYP5iBLKkx0X3ebxBqnYSIkFM';
     const GEMINI_API_KEY = 'AQ.Ab8RN6I687fn-8FP-9eotjeo9v7jUAPaeLwdpweFSPgyx9PzGA';
 
-    // Supabaseの準備
     const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const { useState, useEffect, useRef } = React;
 
-    const { useState, useEffect } = React;
+    // ==========================================
+    // しおり詳細画面コンポーネント
+    // ==========================================
+    function TripDetail({ trip, onBack }) {
+      const [activeTab, setActiveTab] = useState('schedule');
+      const [schedules, setSchedules] = useState([]);
+      const [items, setItems] = useState([]);
+      const [memories, setMemories] = useState([]);
+      
+      // 入力フォーム用ステート
+      const [newItem, setNewItem] = useState('');
+      const [newSchedule, setNewSchedule] = useState({ time: '', place: '', memo: '' });
+      const [uploading, setUploading] = useState(false);
+      const fileInputRef = useRef(null);
 
+      // AIチャット用
+      const [chatInput, setChatInput] = useState('');
+      const [chatLog, setChatLog] = useState([{ role: 'ai', text: '旅行について何でも相談してね！持ち物の提案や、スケジュールのアイデア出しが得意です。' }]);
+      const [isAiLoading, setIsAiLoading] = useState(false);
+
+      useEffect(() => {
+        fetchData();
+      }, [activeTab]);
+
+      const fetchData = async () => {
+        if (activeTab === 'schedule') {
+          const { data } = await supabase.from('schedules').select('*').eq('trip_id', trip.id).order('time', { ascending: true });
+          setSchedules(data || []);
+        } else if (activeTab === 'items') {
+          const { data } = await supabase.from('items').select('*').eq('trip_id', trip.id).order('created_at', { ascending: true });
+          setItems(data || []);
+        } else if (activeTab === 'memories') {
+          const { data } = await supabase.from('memories').select('*').eq('trip_id', trip.id).order('created_at', { ascending: false });
+          setMemories(data || []);
+        }
+      };
+
+      // --- 持ち物機能 ---
+      const handleAddItem = async (e) => {
+        e?.preventDefault();
+        if (!newItem) return;
+        await supabase.from('items').insert([{ trip_id: trip.id, name: newItem }]);
+        setNewItem('');
+        fetchData();
+      };
+
+      const toggleItem = async (id, currentStatus) => {
+        await supabase.from('items').update({ is_checked: !currentStatus }).eq('id', id);
+        fetchData();
+      };
+
+      // --- 日程表機能 ---
+      const handleAddSchedule = async (e) => {
+        e.preventDefault();
+        if (!newSchedule.place) return;
+        await supabase.from('schedules').insert([{ trip_id: trip.id, ...newSchedule }]);
+        setNewSchedule({ time: '', place: '', memo: '' });
+        fetchData();
+      };
+
+      const deleteSchedule = async (id) => {
+        if(confirm('この予定を削除しますか？')) {
+          await supabase.from('schedules').delete().eq('id', id);
+          fetchData();
+        }
+      };
+
+      // --- 思い出（写真アップロード）機能 ---
+      const handleImageUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        setUploading(true);
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}.${fileExt}`;
+
+        // 1. Storageに画像をアップロード
+        const { error: uploadError } = await supabase.storage
+          .from('trip-photos')
+          .upload(fileName, file);
+
+        if (uploadError) {
+          alert('アップロード失敗: ' + uploadError.message);
+          setUploading(false);
+          return;
+        }
+
+        // 2. 公開URLを取得
+        const { data: { publicUrl } } = supabase.storage
+          .from('trip-photos')
+          .getPublicUrl(fileName);
+
+        // 3. Databaseに保存
+        await supabase.from('memories').insert([{ trip_id: trip.id, image_url: publicUrl, memo: '写真を追加しました' }]);
+        
+        setUploading(false);
+        fetchData();
+      };
+
+      // --- AI相談機能 ---
+      const handleSendChat = async (e) => {
+        e.preventDefault();
+        if (!chatInput.trim()) return;
+
+        const userMsg = chatInput;
+        setChatLog(prev => [...prev, { role: 'user', text: userMsg }]);
+        setChatInput('');
+        setIsAiLoading(true);
+
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: userMsg + "。簡潔に、明るく答えてください。" }] }] })
+          });
+          
+          const data = await response.json();
+          const aiText = data.candidates[0].content.parts[0].text;
+          setChatLog(prev => [...prev, { role: 'ai', text: aiText }]);
+        } catch (error) {
+          setChatLog(prev => [...prev, { role: 'ai', text: 'ごめんなさい、エラーが発生しました。' }]);
+        }
+        setIsAiLoading(false);
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto bg-white min-h-screen shadow-xl">
+          {/* コンパクトなヘッダー */}
+          <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-4 flex items-center justify-between sticky top-0 z-10">
+            <button onClick={onBack} className="text-white hover:bg-white/20 p-2 rounded-full transition">
+              <i className="fa-solid fa-chevron-left text-xl"></i>
+            </button>
+            <div className="text-center flex-1">
+              <h1 className="text-lg font-bold truncate">{trip.title}</h1>
+            </div>
+            <button className="text-white hover:bg-white/20 p-2 rounded-full transition">
+              <i className="fa-solid fa-share-nodes text-xl"></i>
+            </button>
+          </div>
+
+          {/* タブメニュー */}
+          <div className="flex border-b text-sm font-medium bg-white sticky top-[60px] z-10">
+            {[
+              { id: 'schedule', icon: 'fa-calendar-days', label: '日程' },
+              { id: 'items', icon: 'fa-suitcase', label: '持ち物' },
+              { id: 'memories', icon: 'fa-image', label: '思い出' },
+              { id: 'ai', icon: 'fa-robot', label: 'AI相談' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 py-3 text-center transition ${activeTab === tab.id ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                <i className={`fa-solid ${tab.icon} block mb-1 text-lg`}></i>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* コンテンツエリア */}
+          <div className="p-4 bg-gray-50 min-h-[calc(100vh-140px)]">
+            
+            {/* 1. 日程表タブ */}
+            {activeTab === 'schedule' && (
+              <div className="space-y-4 max-w-xl mx-auto">
+                <form onSubmit={handleAddSchedule} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex gap-2">
+                  <input type="time" value={newSchedule.time} onChange={e => setNewSchedule({...newSchedule, time: e.target.value})} className="border rounded p-2 text-sm" />
+                  <input type="text" placeholder="場所・予定" value={newSchedule.place} onChange={e => setNewSchedule({...newSchedule, place: e.target.value})} className="border rounded p-2 text-sm flex-1" required />
+                  <button type="submit" className="bg-blue-600 text-white px-3 rounded font-bold"><i className="fa-solid fa-plus"></i></button>
+                </form>
+                
+                <div className="relative border-l-2 border-blue-200 ml-4 space-y-6 mt-6">
+                  {schedules.map(sch => (
+                    <div key={sch.id} className="relative pl-6">
+                      <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-blue-500 ring-4 ring-gray-50"></div>
+                      <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 flex justify-between items-start">
+                        <div>
+                          <span className="text-blue-600 font-bold text-sm">{sch.time || '時間未定'}</span>
+                          <h3 className="font-bold text-gray-800">{sch.place}</h3>
+                        </div>
+                        <button onClick={() => deleteSchedule(sch.id)} className="text-gray-400 hover:text-red-500"><i className="fa-solid fa-trash"></i></button>
+                      </div>
+                    </div>
+                  ))}
+                  {schedules.length === 0 && <p className="text-gray-400 ml-6">予定がありません</p>}
+                </div>
+              </div>
+            )}
+
+            {/* 2. 持ち物タブ */}
+            {activeTab === 'items' && (
+              <div className="max-w-xl mx-auto space-y-4">
+                <form onSubmit={handleAddItem} className="flex gap-2">
+                  <input type="text" placeholder="新しい持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3" />
+                  <button type="submit" className="bg-blue-600 text-white px-4 rounded-lg font-bold">追加</button>
+                </form>
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                  {items.map(item => (
+                    <div key={item.id} onClick={() => toggleItem(item.id, item.is_checked)} className="flex items-center p-4 border-b last:border-b-0 cursor-pointer hover:bg-gray-50">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center mr-3 border ${item.is_checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300'}`}>
+                        {item.is_checked && <i className="fa-solid fa-check text-xs"></i>}
+                      </div>
+                      <span className={`flex-1 ${item.is_checked ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{item.name}</span>
+                    </div>
+                  ))}
+                  {items.length === 0 && <p className="p-6 text-center text-gray-400">持ち物が登録されていません</p>}
+                </div>
+              </div>
+            )}
+
+            {/* 3. 思い出タブ */}
+            {activeTab === 'memories' && (
+              <div className="space-y-6">
+                <div className="text-center">
+                  <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
+                  <button onClick={() => fileInputRef.current.click()} disabled={uploading} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-blue-700 transition">
+                    <i className="fa-solid fa-camera mr-2"></i> {uploading ? 'アップロード中...' : '写真を追加する'}
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {memories.map(mem => (
+                    <div key={mem.id} className="aspect-square bg-gray-200 rounded-lg overflow-hidden shadow-sm">
+                      <img src={mem.image_url} alt="思い出" className="w-full h-full object-cover" />
+                    </div>
+                  ))}
+                </div>
+                {memories.length === 0 && <p className="text-center text-gray-400 mt-10">まだ写真がありません</p>}
+              </div>
+            )}
+
+            {/* 4. AI相談タブ */}
+            {activeTab === 'ai' && (
+              <div className="max-w-xl mx-auto flex flex-col h-[calc(100vh-200px)]">
+                <div className="flex-1 overflow-y-auto p-2 space-y-4">
+                  {chatLog.map((chat, idx) => (
+                    <div key={idx} className={`flex ${chat.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%] p-3 rounded-2xl ${chat.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none shadow-sm border border-gray-100'}`}>
+                        {chat.text}
+                      </div>
+                    </div>
+                  ))}
+                  {isAiLoading && (
+                    <div className="flex justify-start"><div className="bg-white p-3 rounded-2xl rounded-bl-none shadow-sm border border-gray-100 text-gray-400"><i className="fa-solid fa-spinner fa-spin"></i> AIが考え中...</div></div>
+                  )}
+                </div>
+                <form onSubmit={handleSendChat} className="mt-4 flex gap-2">
+                  <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="メッセージを入力..." className="flex-1 border border-gray-300 rounded-full px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm" />
+                  <button type="submit" disabled={isAiLoading || !chatInput.trim()} className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg disabled:opacity-50">
+                    <i className="fa-solid fa-paper-plane"></i>
+                  </button>
+                </form>
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // メインアプリケーション（画面切り替え管理）
+    // ==========================================
     function App() {
       const [trips, setTrips] = useState([]);
-      const [loading, setLoading] = useState(true);
+      const [currentTrip, setCurrentTrip] = useState(null);
       const [newTripTitle, setNewTripTitle] = useState('');
 
-      // 画面が開いたときに旅行データを読み込む
       useEffect(() => {
         fetchTrips();
       }, []);
 
       const fetchTrips = async () => {
-        setLoading(true);
-        const { data, error } = await supabase
-          .from('trips')
-          .select('*')
-          .order('created_at', { ascending: false });
-        
-        if (error) console.error('エラー:', error);
-        else setTrips(data || []);
-        setLoading(false);
+        const { data } = await supabase.from('trips').select('*').order('created_at', { ascending: false });
+        setTrips(data || []);
       };
 
-      // 新しい旅行を追加する
       const addTrip = async (e) => {
         e.preventDefault();
         if (!newTripTitle) return;
-
-        const { error } = await supabase
-          .from('trips')
-          .insert([{ title: newTripTitle, start_date: new Date().toISOString().split('T')[0] }]);
-
-        if (error) {
-          alert('追加に失敗しました');
-          console.error(error);
-        } else {
-          setNewTripTitle('');
-          fetchTrips(); // 追加後に一覧を再読み込み
-        }
+        await supabase.from('trips').insert([{ title: newTripTitle }]);
+        setNewTripTitle('');
+        fetchTrips();
       };
 
+      // 旅行が選択されている場合は詳細画面を表示
+      if (currentTrip) {
+        return <TripDetail trip={currentTrip} onBack={() => setCurrentTrip(null)} />;
+      }
+
+      // ホーム画面（旅行一覧）
       return (
         <div className="max-w-4xl mx-auto p-4 md:p-8">
-          <div className="flex justify-between items-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-800">✈️ 家族の旅行一覧</h1>
-          </div>
-
-          {/* 新規追加フォーム */}
+          <h1 className="text-2xl font-bold text-gray-800 mb-8"><i className="fa-solid fa-plane-departure text-blue-600 mr-2"></i> 家族の旅行一覧</h1>
           <form onSubmit={addTrip} className="bg-white p-4 rounded-xl shadow-sm mb-8 flex gap-2">
-            <input
-              type="text"
-              placeholder="新しい旅行のタイトル (例: 沖縄旅行 2026)"
-              className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              value={newTripTitle}
-              onChange={(e) => setNewTripTitle(e.target.value)}
-            />
-            <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-blue-700">
-              追加
-            </button>
+            <input type="text" placeholder="新しい旅行のタイトル (例: 沖縄旅行)" className="flex-1 border border-gray-300 rounded-lg px-4 py-2" value={newTripTitle} onChange={(e) => setNewTripTitle(e.target.value)} />
+            <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">追加</button>
           </form>
-
-          {/* 旅行リスト */}
-          {loading ? (
-            <p className="text-center text-gray-500">読み込み中...</p>
-          ) : trips.length === 0 ? (
-            <div className="text-center bg-white p-10 rounded-xl shadow-sm">
-              <p className="text-gray-500 mb-2">まだ旅行が登録されていません。</p>
-              <p className="text-sm text-gray-400">上のフォームから最初の旅行を追加してみましょう！</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {trips.map(trip => (
-                <div key={trip.id} className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition">
-                  <h2 className="text-xl font-bold mb-2">{trip.title}</h2>
-                  <p className="text-sm text-gray-500">
-                    登録日: {new Date(trip.created_at).toLocaleDateString('ja-JP')}
-                  </p>
-                  <div className="mt-4 text-right">
-                    <span className="text-blue-600 text-sm font-bold">しおりを開く →</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {trips.map(trip => (
+              <div key={trip.id} onClick={() => setCurrentTrip(trip)} className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition">
+                <h2 className="text-xl font-bold mb-2">{trip.title}</h2>
+                <div className="mt-4 text-right text-blue-600 text-sm font-bold">しおりを開く →</div>
+              </div>
+            ))}
+          </div>
         </div>
       );
     }
