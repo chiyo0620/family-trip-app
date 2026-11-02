@@ -9,10 +9,9 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <!-- アイコン用 -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body class="bg-gray-50 text-gray-800 font-sans">
+<body class="bg-gray-100 text-gray-800 font-sans">
   <div id="root"></div>
 
   <script type="text/babel">
@@ -27,7 +26,7 @@
     const { useState, useEffect, useRef } = React;
 
     // ==========================================
-    // しおり詳細画面コンポーネント
+    // しおり詳細画面
     // ==========================================
     function TripDetail({ trip, onBack }) {
       const [activeTab, setActiveTab] = useState('schedule');
@@ -35,13 +34,17 @@
       const [items, setItems] = useState([]);
       const [memories, setMemories] = useState([]);
       
-      // 入力フォーム用ステート
       const [newItem, setNewItem] = useState('');
-      const [newSchedule, setNewSchedule] = useState({ time: '', place: '', memo: '' });
+      const [newSchedule, setNewSchedule] = useState({ time: '', place: '' });
       const [uploading, setUploading] = useState(false);
       const fileInputRef = useRef(null);
 
-      // AIチャット用
+      // 【追加】写真拡大用ステート
+      const [selectedImage, setSelectedImage] = useState(null);
+      // 【追加】日程編集用ステート
+      const [editingScheduleId, setEditingScheduleId] = useState(null);
+      const [editScheduleData, setEditScheduleData] = useState({ time: '', place: '' });
+
       const [chatInput, setChatInput] = useState('');
       const [chatLog, setChatLog] = useState([{ role: 'ai', text: '旅行について何でも相談してね！持ち物の提案や、スケジュールのアイデア出しが得意です。' }]);
       const [isAiLoading, setIsAiLoading] = useState(false);
@@ -63,9 +66,9 @@
         }
       };
 
-      // --- 持ち物機能 ---
+      // --- 持ち物 ---
       const handleAddItem = async (e) => {
-        e?.preventDefault();
+        e.preventDefault();
         if (!newItem) return;
         await supabase.from('items').insert([{ trip_id: trip.id, name: newItem }]);
         setNewItem('');
@@ -77,12 +80,12 @@
         fetchData();
       };
 
-      // --- 日程表機能 ---
+      // --- 日程表 ---
       const handleAddSchedule = async (e) => {
         e.preventDefault();
         if (!newSchedule.place) return;
         await supabase.from('schedules').insert([{ trip_id: trip.id, ...newSchedule }]);
-        setNewSchedule({ time: '', place: '', memo: '' });
+        setNewSchedule({ time: '', place: '' });
         fetchData();
       };
 
@@ -93,42 +96,41 @@
         }
       };
 
-      // --- 思い出（写真アップロード）機能 ---
+      // 【追加】日程の編集保存
+      const handleUpdateSchedule = async (id) => {
+        if (!editScheduleData.place) return;
+        await supabase.from('schedules').update(editScheduleData).eq('id', id);
+        setEditingScheduleId(null);
+        fetchData();
+      };
+
+      // --- 思い出 ---
       const handleImageUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        
         setUploading(true);
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}.${fileExt}`;
-
-        // 1. Storageに画像をアップロード
-        const { error: uploadError } = await supabase.storage
-          .from('trip-photos')
-          .upload(fileName, file);
-
+        const fileName = `${Date.now()}.${file.name.split('.').pop()}`;
+        const { error: uploadError } = await supabase.storage.from('trip-photos').upload(fileName, file);
         if (uploadError) {
           alert('アップロード失敗: ' + uploadError.message);
           setUploading(false);
           return;
         }
-
-        // 2. 公開URLを取得
-        const { data: { publicUrl } } = supabase.storage
-          .from('trip-photos')
-          .getPublicUrl(fileName);
-
-        // 3. Databaseに保存
-        await supabase.from('memories').insert([{ trip_id: trip.id, image_url: publicUrl, memo: '写真を追加しました' }]);
-        
+        const { data: { publicUrl } } = supabase.storage.from('trip-photos').getPublicUrl(fileName);
+        await supabase.from('memories').insert([{ trip_id: trip.id, image_url: publicUrl }]);
         setUploading(false);
         fetchData();
       };
 
-      // --- AI相談機能 ---
+      // --- AI相談 ---
       const handleSendChat = async (e) => {
         e.preventDefault();
         if (!chatInput.trim()) return;
+        
+        if (GEMINI_API_KEY === 'あなたのGeminiのAPIキー' || !GEMINI_API_KEY) {
+          alert('GeminiのAPIキーが設定されていません。コードを確認してください。');
+          return;
+        }
 
         const userMsg = chatInput;
         setChatLog(prev => [...prev, { role: 'user', text: userMsg }]);
@@ -141,162 +143,186 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: userMsg + "。簡潔に、明るく答えてください。" }] }] })
           });
-          
           const data = await response.json();
+          if(data.error) throw new Error(data.error.message);
           const aiText = data.candidates[0].content.parts[0].text;
           setChatLog(prev => [...prev, { role: 'ai', text: aiText }]);
         } catch (error) {
-          setChatLog(prev => [...prev, { role: 'ai', text: 'ごめんなさい、エラーが発生しました。' }]);
+          console.error(error);
+          setChatLog(prev => [...prev, { role: 'ai', text: `エラーが発生しました（${error.message}）` }]);
         }
         setIsAiLoading(false);
       };
 
+      // 【追加】共有機能
+      const handleShare = () => {
+        if (navigator.share) {
+          navigator.share({ title: trip.title, text: '家族旅行のしおりです！', url: window.location.href })
+            .catch(console.error);
+        } else {
+          navigator.clipboard.writeText(window.location.href);
+          alert('URLをコピーしました！LINEなどに貼り付けて共有できます。');
+        }
+      };
+
       return (
-        <div className="max-w-4xl mx-auto bg-white min-h-screen shadow-xl">
-          {/* コンパクトなヘッダー */}
-          <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-4 flex items-center justify-between sticky top-0 z-10">
-            <button onClick={onBack} className="text-white hover:bg-white/20 p-2 rounded-full transition">
-              <i className="fa-solid fa-chevron-left text-xl"></i>
-            </button>
-            <div className="text-center flex-1">
-              <h1 className="text-lg font-bold truncate">{trip.title}</h1>
-            </div>
-            <button className="text-white hover:bg-white/20 p-2 rounded-full transition">
-              <i className="fa-solid fa-share-nodes text-xl"></i>
-            </button>
+        <div className="max-w-4xl mx-auto bg-white h-[100dvh] flex flex-col shadow-xl">
+          
+          {/* ヘッダー */}
+          <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-4 flex items-center justify-between shrink-0">
+            <button onClick={onBack} className="hover:bg-white/20 p-2 rounded-full"><i className="fa-solid fa-chevron-left text-xl"></i></button>
+            <h1 className="text-lg font-bold truncate">{trip.title}</h1>
+            <button onClick={handleShare} className="hover:bg-white/20 p-2 rounded-full" title="家族に共有する"><i className="fa-solid fa-share-nodes text-xl"></i></button>
           </div>
 
           {/* タブメニュー */}
-          <div className="flex border-b text-sm font-medium bg-white sticky top-[60px] z-10">
+          <div className="flex border-b text-sm font-medium bg-white shrink-0">
             {[
               { id: 'schedule', icon: 'fa-calendar-days', label: '日程' },
               { id: 'items', icon: 'fa-suitcase', label: '持ち物' },
               { id: 'memories', icon: 'fa-image', label: '思い出' },
               { id: 'ai', icon: 'fa-robot', label: 'AI相談' }
             ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 py-3 text-center transition ${activeTab === tab.id ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
-              >
-                <i className={`fa-solid ${tab.icon} block mb-1 text-lg`}></i>
-                {tab.label}
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-center transition ${activeTab === tab.id ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>
+                <i className={`fa-solid ${tab.icon} block mb-1 text-lg`}></i>{tab.label}
               </button>
             ))}
           </div>
 
-          {/* コンテンツエリア */}
-          <div className="p-4 bg-gray-50 min-h-[calc(100vh-140px)]">
+          {/* コンテンツエリア (スクロール領域) */}
+          <div className="flex-1 overflow-y-auto bg-gray-50 p-4">
             
-            {/* 1. 日程表タブ */}
+            {/* 1. 日程 */}
             {activeTab === 'schedule' && (
-              <div className="space-y-4 max-w-xl mx-auto">
-                <form onSubmit={handleAddSchedule} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex gap-2">
+              <div className="max-w-xl mx-auto pb-6">
+                <form onSubmit={handleAddSchedule} className="bg-white p-4 rounded-xl shadow-sm flex gap-2 mb-6">
                   <input type="time" value={newSchedule.time} onChange={e => setNewSchedule({...newSchedule, time: e.target.value})} className="border rounded p-2 text-sm" />
                   <input type="text" placeholder="場所・予定" value={newSchedule.place} onChange={e => setNewSchedule({...newSchedule, place: e.target.value})} className="border rounded p-2 text-sm flex-1" required />
-                  <button type="submit" className="bg-blue-600 text-white px-3 rounded font-bold"><i className="fa-solid fa-plus"></i></button>
+                  <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold"><i className="fa-solid fa-plus"></i></button>
                 </form>
                 
-                <div className="relative border-l-2 border-blue-200 ml-4 space-y-6 mt-6">
+                <div className="border-l-2 border-blue-200 ml-4 space-y-4">
                   {schedules.map(sch => (
                     <div key={sch.id} className="relative pl-6">
-                      <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-blue-500 ring-4 ring-gray-50"></div>
-                      <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 flex justify-between items-start">
-                        <div>
-                          <span className="text-blue-600 font-bold text-sm">{sch.time || '時間未定'}</span>
-                          <h3 className="font-bold text-gray-800">{sch.place}</h3>
-                        </div>
-                        <button onClick={() => deleteSchedule(sch.id)} className="text-gray-400 hover:text-red-500"><i className="fa-solid fa-trash"></i></button>
+                      <div className="absolute -left-[9px] top-4 w-4 h-4 rounded-full bg-blue-500 ring-4 ring-gray-50"></div>
+                      <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100">
+                        {editingScheduleId === sch.id ? (
+                          // 編集モード
+                          <div className="flex flex-col gap-2">
+                            <input type="time" value={editScheduleData.time} onChange={e => setEditScheduleData({...editScheduleData, time: e.target.value})} className="border rounded p-1" />
+                            <input type="text" value={editScheduleData.place} onChange={e => setEditScheduleData({...editScheduleData, place: e.target.value})} className="border rounded p-1" />
+                            <div className="flex justify-end gap-2 mt-2">
+                              <button onClick={() => setEditingScheduleId(null)} className="text-gray-500 px-3 py-1 bg-gray-100 rounded">キャンセル</button>
+                              <button onClick={() => handleUpdateSchedule(sch.id)} className="text-white px-3 py-1 bg-blue-600 rounded">保存</button>
+                            </div>
+                          </div>
+                        ) : (
+                          // 通常表示モード
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <span className="text-blue-600 font-bold text-sm">{sch.time || '時間未定'}</span>
+                              <h3 className="font-bold text-gray-800">{sch.place}</h3>
+                            </div>
+                            <div className="flex gap-3 text-gray-400">
+                              <button onClick={() => { setEditingScheduleId(sch.id); setEditScheduleData({ time: sch.time, place: sch.place }); }}><i className="fa-solid fa-pen"></i></button>
+                              <button onClick={() => deleteSchedule(sch.id)} className="hover:text-red-500"><i className="fa-solid fa-trash"></i></button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
-                  {schedules.length === 0 && <p className="text-gray-400 ml-6">予定がありません</p>}
                 </div>
               </div>
             )}
 
-            {/* 2. 持ち物タブ */}
+            {/* 2. 持ち物 */}
             {activeTab === 'items' && (
-              <div className="max-w-xl mx-auto space-y-4">
+              <div className="max-w-xl mx-auto space-y-4 pb-6">
                 <form onSubmit={handleAddItem} className="flex gap-2">
-                  <input type="text" placeholder="新しい持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3" />
+                  <input type="text" placeholder="持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3" />
                   <button type="submit" className="bg-blue-600 text-white px-4 rounded-lg font-bold">追加</button>
                 </form>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   {items.map(item => (
-                    <div key={item.id} onClick={() => toggleItem(item.id, item.is_checked)} className="flex items-center p-4 border-b last:border-b-0 cursor-pointer hover:bg-gray-50">
+                    <div key={item.id} onClick={() => toggleItem(item.id, item.is_checked)} className="flex items-center p-4 border-b cursor-pointer hover:bg-gray-50">
                       <div className={`w-6 h-6 rounded-full flex items-center justify-center mr-3 border ${item.is_checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300'}`}>
                         {item.is_checked && <i className="fa-solid fa-check text-xs"></i>}
                       </div>
                       <span className={`flex-1 ${item.is_checked ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{item.name}</span>
                     </div>
                   ))}
-                  {items.length === 0 && <p className="p-6 text-center text-gray-400">持ち物が登録されていません</p>}
                 </div>
               </div>
             )}
 
-            {/* 3. 思い出タブ */}
+            {/* 3. 思い出 */}
             {activeTab === 'memories' && (
-              <div className="space-y-6">
-                <div className="text-center">
+              <div className="space-y-4 pb-6">
+                <div className="text-center mb-6">
                   <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
-                  <button onClick={() => fileInputRef.current.click()} disabled={uploading} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg hover:bg-blue-700 transition">
-                    <i className="fa-solid fa-camera mr-2"></i> {uploading ? 'アップロード中...' : '写真を追加する'}
+                  <button onClick={() => fileInputRef.current.click()} disabled={uploading} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg">
+                    <i className="fa-solid fa-camera mr-2"></i> {uploading ? 'アップロード中...' : '写真を追加'}
                   </button>
                 </div>
-                
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   {memories.map(mem => (
-                    <div key={mem.id} className="aspect-square bg-gray-200 rounded-lg overflow-hidden shadow-sm">
+                    <div key={mem.id} onClick={() => setSelectedImage(mem.image_url)} className="aspect-square bg-gray-200 rounded-lg overflow-hidden cursor-pointer hover:opacity-80 transition">
                       <img src={mem.image_url} alt="思い出" className="w-full h-full object-cover" />
                     </div>
                   ))}
                 </div>
-                {memories.length === 0 && <p className="text-center text-gray-400 mt-10">まだ写真がありません</p>}
               </div>
             )}
 
-            {/* 4. AI相談タブ */}
+            {/* 4. AI相談のログ表示部分 */}
             {activeTab === 'ai' && (
-              <div className="max-w-xl mx-auto flex flex-col h-[calc(100vh-200px)]">
-                <div className="flex-1 overflow-y-auto p-2 space-y-4">
-                  {chatLog.map((chat, idx) => (
-                    <div key={idx} className={`flex ${chat.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[80%] p-3 rounded-2xl ${chat.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none shadow-sm border border-gray-100'}`}>
-                        {chat.text}
-                      </div>
+              <div className="max-w-xl mx-auto space-y-4 pb-4">
+                {chatLog.map((chat, idx) => (
+                  <div key={idx} className={`flex ${chat.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] p-3 rounded-2xl ${chat.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none shadow-sm border border-gray-100'}`}>
+                      {chat.text}
                     </div>
-                  ))}
-                  {isAiLoading && (
-                    <div className="flex justify-start"><div className="bg-white p-3 rounded-2xl rounded-bl-none shadow-sm border border-gray-100 text-gray-400"><i className="fa-solid fa-spinner fa-spin"></i> AIが考え中...</div></div>
-                  )}
-                </div>
-                <form onSubmit={handleSendChat} className="mt-4 flex gap-2">
-                  <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="メッセージを入力..." className="flex-1 border border-gray-300 rounded-full px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-400 shadow-sm" />
-                  <button type="submit" disabled={isAiLoading || !chatInput.trim()} className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white w-12 h-12 rounded-full flex items-center justify-center shadow-lg disabled:opacity-50">
-                    <i className="fa-solid fa-paper-plane"></i>
-                  </button>
-                </form>
+                  </div>
+                ))}
+                {isAiLoading && <div className="flex justify-start"><div className="bg-white p-3 rounded-2xl rounded-bl-none text-gray-400"><i className="fa-solid fa-spinner fa-spin"></i> AIが考え中...</div></div>}
               </div>
             )}
-
           </div>
+
+          {/* AI相談の入力枠 (画面下部に完全固定) */}
+          {activeTab === 'ai' && (
+            <div className="bg-white p-4 border-t shrink-0">
+              <form onSubmit={handleSendChat} className="max-w-xl mx-auto flex gap-2">
+                <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="メッセージを入力..." className="flex-1 border border-gray-300 rounded-full px-4 py-3 focus:outline-none" />
+                <button type="submit" disabled={isAiLoading || !chatInput.trim()} className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white w-12 h-12 rounded-full flex items-center justify-center shrink-0">
+                  <i className="fa-solid fa-paper-plane"></i>
+                </button>
+              </form>
+            </div>
+          )}
+          
+          {/* 写真拡大のポップアップ (モーダル) */}
+          {selectedImage && (
+            <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={() => setSelectedImage(null)}>
+              <img src={selectedImage} alt="拡大" className="max-w-full max-h-full object-contain" />
+              <button className="absolute top-4 right-4 text-white text-3xl p-4"><i className="fa-solid fa-xmark"></i></button>
+            </div>
+          )}
+
         </div>
       );
     }
 
     // ==========================================
-    // メインアプリケーション（画面切り替え管理）
+    // メイン（一覧画面）
     // ==========================================
     function App() {
       const [trips, setTrips] = useState([]);
       const [currentTrip, setCurrentTrip] = useState(null);
       const [newTripTitle, setNewTripTitle] = useState('');
 
-      useEffect(() => {
-        fetchTrips();
-      }, []);
+      useEffect(() => { fetchTrips(); }, []);
 
       const fetchTrips = async () => {
         const { data } = await supabase.from('trips').select('*').order('created_at', { ascending: false });
@@ -311,22 +337,18 @@
         fetchTrips();
       };
 
-      // 旅行が選択されている場合は詳細画面を表示
-      if (currentTrip) {
-        return <TripDetail trip={currentTrip} onBack={() => setCurrentTrip(null)} />;
-      }
+      if (currentTrip) return <TripDetail trip={currentTrip} onBack={() => setCurrentTrip(null)} />;
 
-      // ホーム画面（旅行一覧）
       return (
         <div className="max-w-4xl mx-auto p-4 md:p-8">
           <h1 className="text-2xl font-bold text-gray-800 mb-8"><i className="fa-solid fa-plane-departure text-blue-600 mr-2"></i> 家族の旅行一覧</h1>
           <form onSubmit={addTrip} className="bg-white p-4 rounded-xl shadow-sm mb-8 flex gap-2">
-            <input type="text" placeholder="新しい旅行のタイトル (例: 沖縄旅行)" className="flex-1 border border-gray-300 rounded-lg px-4 py-2" value={newTripTitle} onChange={(e) => setNewTripTitle(e.target.value)} />
+            <input type="text" placeholder="新しい旅行 (例: 沖縄旅行)" className="flex-1 border rounded-lg px-4 py-2" value={newTripTitle} onChange={e => setNewTripTitle(e.target.value)} />
             <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold">追加</button>
           </form>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {trips.map(trip => (
-              <div key={trip.id} onClick={() => setCurrentTrip(trip)} className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition">
+              <div key={trip.id} onClick={() => setCurrentTrip(trip)} className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 cursor-pointer">
                 <h2 className="text-xl font-bold mb-2">{trip.title}</h2>
                 <div className="mt-4 text-right text-blue-600 text-sm font-bold">しおりを開く →</div>
               </div>
