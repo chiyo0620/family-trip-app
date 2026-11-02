@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Family Travel Planner</title>
+
+  <!-- アプリアイコンとスマホ向け全画面設定 -->
+  <link rel="icon" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="旅行しおり">
+
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -40,7 +48,7 @@
       return `${month}/${day}(${weekdays[date.getDay()]})`;
     };
 
-    // AIへの指示文（dayとmemoに対応した最新版）
+    // AIへの指示文
     const GEMINI_PROMPT_TEMPLATE = `これまでの旅行相談の内容をもとに、旅行しおりアプリに取り込むためのデータを出力してください。
 必ず以下のJSONフォーマットのみを出力してください。前後の挨拶や補足文は不要です。
 
@@ -117,7 +125,7 @@
       };
 
       const deleteSchedule = async (id) => {
-        if(confirm('削除しますか？')) {
+        if(confirm('予定を削除しますか？')) {
           await supabase.from('schedules').delete().eq('id', id);
           fetchData();
         }
@@ -247,23 +255,19 @@
               </div>
             )}
 
-            {/* 持ち物タブ */}
+            {/* 持ち物・思い出・AIタブ */}
             {activeTab === 'items' && (
               <div className="max-w-xl mx-auto pb-6">
                 <form onSubmit={handleAddItem} className="flex gap-2 mb-4"><input type="text" placeholder="持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3 text-sm" /><button type="submit" className="bg-blue-600 text-white px-5 rounded-lg font-bold text-sm">追加</button></form>
                 <div className="bg-white rounded-xl shadow-sm border overflow-hidden">{items.map(item => (<div key={item.id} onClick={() => toggleItem(item.id, item.is_checked)} className="flex items-center p-4 border-b cursor-pointer hover:bg-gray-50"><div className={`w-6 h-6 rounded-full flex items-center justify-center mr-3 border ${item.is_checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300'}`}>{item.is_checked && <i className="fa-solid fa-check text-xs"></i>}</div><span className={`flex-1 text-sm ${item.is_checked ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{item.name}</span></div>))}</div>
               </div>
             )}
-
-            {/* 思い出タブ */}
             {activeTab === 'memories' && (
               <div className="max-w-xl mx-auto pb-6">
                 <div className="text-center mb-6"><input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" /><button onClick={() => fileInputRef.current.click()} disabled={uploading} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg"><i className="fa-solid fa-camera mr-2"></i> {uploading ? 'アップロード中...' : '写真を追加'}</button></div>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">{memories.map(mem => (<div key={mem.id} onClick={() => setSelectedImage(mem.image_url)} className="aspect-square bg-gray-200 rounded-lg overflow-hidden cursor-pointer hover:opacity-80"><img src={mem.image_url} alt="思い出" className="w-full h-full object-cover" /></div>))}</div>
               </div>
             )}
-
-            {/* AI連携タブ（復元） */}
             {activeTab === 'ai' && (
               <div className="max-w-xl mx-auto space-y-4 pb-6">
                 <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm text-indigo-900 leading-relaxed">
@@ -334,7 +338,7 @@
     }
 
     // ==========================================
-    // メイン（一覧画面 ＆ AIプラン取込の復元）
+    // メイン（一覧画面 ＆ 旅行の個別削除機能を追加）
     // ==========================================
     function App() {
       const [trips, setTrips] = useState([]);
@@ -343,7 +347,6 @@
       const [newTripTitle, setNewTripTitle] = useState('');
       const [newTripDate, setNewTripDate] = useState('');
 
-      // AI取り込み用のステート（復元）
       const [showImportModal, setShowImportModal] = useState(false);
       const [importDataText, setImportDataText] = useState('');
       const [isImporting, setIsImporting] = useState(false);
@@ -364,44 +367,46 @@
         fetchTrips();
       };
 
-      // AIデータのインポート処理（memoにも対応！）
+      // 🗑️ 旅行を個別に削除する関数（ここが追加されました！）
+      const deleteTrip = async (e, tripId, tripTitle) => {
+        e.stopPropagation(); // カードのクリック（しおりを開く動作）をブロック
+        if (!confirm(`「${tripTitle}」を完全に削除しますか？\n※この操作は取り消せません。中の予定や持ち物、写真もすべて削除されます。`)) return;
+
+        try {
+          // エラーを防ぐため、中のデータを先に削除
+          await supabase.from('schedules').delete().eq('trip_id', tripId);
+          await supabase.from('items').delete().eq('trip_id', tripId);
+          await supabase.from('memories').delete().eq('trip_id', tripId);
+          
+          // 最後に旅行本体を削除
+          const { error } = await supabase.from('trips').delete().eq('id', tripId);
+          if (error) throw error;
+          
+          fetchTrips(); // 一覧を再読み込み
+        } catch (err) {
+          alert('削除中にエラーが発生しました: ' + err.message);
+        }
+      };
+
       const handleImportPlan = async () => {
         if (!importDataText.trim()) return;
         setIsImporting(true);
-
         try {
           const jsonMatch = importDataText.match(/\{[\s\S]*\}/);
           if (!jsonMatch) throw new Error('有効なデータが見つかりませんでした。');
           const parsed = JSON.parse(jsonMatch[0]);
           if (!parsed.title) throw new Error('旅行タイトルが含まれていません。');
 
-          const { data: tripData, error: tripErr } = await supabase
-            .from('trips')
-            .insert([{ title: parsed.title, start_date: newTripDate || null }]) // 入力された出発日があれば一緒に登録
-            .select()
-            .single();
-
+          const { data: tripData, error: tripErr } = await supabase.from('trips').insert([{ title: parsed.title, start_date: newTripDate || null }]).select().single();
           if (tripErr) throw tripErr;
 
           const tripId = tripData.id;
-
           if (parsed.schedules && parsed.schedules.length > 0) {
-            const scheduleRecords = parsed.schedules.map(s => ({
-              trip_id: tripId,
-              day: Number(s.day) || 1,
-              time: s.time || '',
-              place: s.place || '',
-              memo: s.memo || '' // AIからのメモも取り込む
-            }));
+            const scheduleRecords = parsed.schedules.map(s => ({ trip_id: tripId, day: Number(s.day) || 1, time: s.time || '', place: s.place || '', memo: s.memo || '' }));
             await supabase.from('schedules').insert(scheduleRecords);
           }
-
           if (parsed.items && parsed.items.length > 0) {
-            const itemRecords = parsed.items.map(name => ({
-              trip_id: tripId,
-              name: typeof name === 'string' ? name : (name.name || ''),
-              is_checked: false
-            }));
+            const itemRecords = parsed.items.map(name => ({ trip_id: tripId, name: typeof name === 'string' ? name : (name.name || ''), is_checked: false }));
             await supabase.from('items').insert(itemRecords);
           }
 
@@ -430,7 +435,6 @@
             <h1 className="text-2xl font-bold text-gray-800">
               <i className="fa-solid fa-plane-departure text-blue-600 mr-2"></i> 家族の旅行一覧
             </h1>
-            {/* AIプラン取込ボタン（復元） */}
             <button 
               onClick={() => setShowImportModal(true)} 
               className="bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl shadow hover:bg-indigo-700 transition flex items-center gap-2"
@@ -449,15 +453,27 @@
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {trips.map(trip => (
-              <div key={trip.id} onClick={() => setCurrentTrip(trip)} className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition">
-                <h2 className="text-xl font-bold mb-1">{trip.title}</h2>
-                {trip.start_date && <p className="text-sm text-gray-500 mb-2"><i className="fa-regular fa-calendar mr-1"></i>{trip.start_date} 出発</p>}
-                <div className="mt-4 text-right text-blue-600 text-sm font-bold">しおりを開く →</div>
+              <div key={trip.id} onClick={() => setCurrentTrip(trip)} className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition relative group">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h2 className="text-xl font-bold mb-1 pr-8">{trip.title}</h2>
+                    {trip.start_date && <p className="text-sm text-gray-500 mb-2"><i className="fa-regular fa-calendar mr-1"></i>{trip.start_date} 出発</p>}
+                  </div>
+                  {/* 🗑️ 追加されたゴミ箱ボタン */}
+                  <button 
+                    onClick={(e) => deleteTrip(e, trip.id, trip.title)}
+                    className="absolute top-4 right-4 text-gray-300 hover:text-red-500 p-2 transition-colors rounded-full hover:bg-red-50"
+                    title="旅行を削除"
+                  >
+                    <i className="fa-solid fa-trash"></i>
+                  </button>
+                </div>
+                <div className="mt-2 text-right text-blue-600 text-sm font-bold">しおりを開く →</div>
               </div>
             ))}
           </div>
 
-          {/* AIプラン取り込みポップアップ（復元） */}
+          {/* AIプラン取り込みポップアップ */}
           {showImportModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
@@ -494,7 +510,6 @@
                       className="w-full border rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                     ></textarea>
                   </div>
-                  {/* おまけ：出発日も一緒に設定できるようにしました */}
                   <div>
                      <label className="block text-xs font-bold text-gray-700 mb-1">出発日 (任意)：</label>
                      <input type="date" value={newTripDate} onChange={e => setNewTripDate(e.target.value)} className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"/>
