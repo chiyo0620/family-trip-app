@@ -30,7 +30,6 @@
     ];
     const getDayTheme = (dayNum) => DAY_THEMES[(Math.max(1, dayNum) - 1) % DAY_THEMES.length];
 
-    // 日付計算ツール（開始日と日数を渡すと「11/23(木)」を返す）
     const formatDate = (startDateStr, dayNum) => {
       if (!startDateStr) return '';
       const date = new Date(startDateStr);
@@ -41,6 +40,27 @@
       return `${month}/${day}(${weekdays[date.getDay()]})`;
     };
 
+    // AIへの指示文（dayとmemoに対応した最新版）
+    const GEMINI_PROMPT_TEMPLATE = `これまでの旅行相談の内容をもとに、旅行しおりアプリに取り込むためのデータを出力してください。
+必ず以下のJSONフォーマットのみを出力してください。前後の挨拶や補足文は不要です。
+
+{
+  "title": "旅行タイトル（例: 沖縄3泊4日の家族旅行）",
+  "schedules": [
+    {"day": 1, "time": "10:00", "place": "那覇空港到着", "memo": "レンタカー受付へ直行"},
+    {"day": 1, "time": "13:00", "place": "美ら海水族館", "memo": "チケット事前購入済み"},
+    {"day": 2, "time": "09:30", "place": "古宇利大橋ドライブ", "memo": ""}
+  ],
+  "items": [
+    "着替え",
+    "日焼け止め",
+    "保険証"
+  ]
+}`;
+
+    // ==========================================
+    // しおり詳細画面
+    // ==========================================
     function TripDetail({ trip, onBack }) {
       const [activeTab, setActiveTab] = useState('schedule');
       const [schedules, setSchedules] = useState([]);
@@ -52,7 +72,6 @@
       const fileInputRef = useRef(null);
       const [selectedImage, setSelectedImage] = useState(null);
 
-      // モーダルと予定登録用のステート
       const [showAddModal, setShowAddModal] = useState(false);
       const [newSchedule, setNewSchedule] = useState({ day: 1, time: '', place: '', memo: '' });
       
@@ -90,14 +109,10 @@
         e.preventDefault();
         if (!newSchedule.place) return;
         await supabase.from('schedules').insert([{ 
-          trip_id: trip.id, 
-          day: Number(newSchedule.day) || 1,
-          time: newSchedule.time,
-          place: newSchedule.place,
-          memo: newSchedule.memo
+          trip_id: trip.id, day: Number(newSchedule.day) || 1, time: newSchedule.time, place: newSchedule.place, memo: newSchedule.memo 
         }]);
         setNewSchedule({ ...newSchedule, time: '', place: '', memo: '' });
-        setShowAddModal(false); // 保存後にモーダルを閉じる
+        setShowAddModal(false);
         fetchData();
       };
 
@@ -111,10 +126,7 @@
       const handleUpdateSchedule = async (id) => {
         if (!editScheduleData.place) return;
         await supabase.from('schedules').update({
-          day: Number(editScheduleData.day) || 1,
-          time: editScheduleData.time,
-          place: editScheduleData.place,
-          memo: editScheduleData.memo
+          day: Number(editScheduleData.day) || 1, time: editScheduleData.time, place: editScheduleData.place, memo: editScheduleData.memo
         }).eq('id', id);
         setEditingScheduleId(null);
         fetchData();
@@ -133,6 +145,20 @@
         fetchData();
       };
 
+      const handleShare = () => {
+        if (navigator.share) {
+          navigator.share({ title: trip.title, text: '家族旅行のしおりです！', url: window.location.href }).catch(console.error);
+        } else {
+          navigator.clipboard.writeText(window.location.href);
+          alert('URLをコピーしました！LINEなどに貼り付けて共有できます。');
+        }
+      };
+
+      const copyGeminiPrompt = () => {
+        navigator.clipboard.writeText(GEMINI_PROMPT_TEMPLATE);
+        alert('Geminiへの指示文をコピーしました！Geminiに送ってください。');
+      };
+
       const groupedSchedules = schedules.reduce((acc, sch) => {
         const d = sch.day || 1;
         if (!acc[d]) acc[d] = [];
@@ -148,7 +174,7 @@
               <h1 className="text-lg font-bold truncate leading-tight">{trip.title}</h1>
               {trip.start_date && <div className="text-xs text-blue-100">{formatDate(trip.start_date, 1)}出発</div>}
             </div>
-            <button className="hover:bg-white/20 p-2 rounded-full"><i className="fa-solid fa-share-nodes text-xl"></i></button>
+            <button onClick={handleShare} className="hover:bg-white/20 p-2 rounded-full"><i className="fa-solid fa-share-nodes text-xl"></i></button>
           </div>
 
           <div className="flex border-b text-sm font-medium bg-white shrink-0">
@@ -166,8 +192,7 @@
                   Object.keys(groupedSchedules).sort((a,b) => Number(a) - Number(b)).map(dayKey => {
                     const dayNum = Number(dayKey);
                     const theme = getDayTheme(dayNum);
-                    const daySchedules = groupedSchedules[dayKey];
-                    const dateStr = formatDate(trip.start_date, dayNum); // 日付を計算
+                    const dateStr = formatDate(trip.start_date, dayNum);
 
                     return (
                       <div key={dayKey} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
@@ -177,7 +202,7 @@
                           </span>
                         </div>
                         <div className={`relative border-l-2 ${theme.line} ml-3 space-y-4`}>
-                          {daySchedules.map(sch => (
+                          {groupedSchedules[dayKey].map(sch => (
                             <div key={sch.id} className="relative pl-5">
                               <div className={`absolute -left-[7px] top-3.5 w-3 h-3 rounded-full ${theme.dot} ring-4 ring-white`}></div>
                               <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
@@ -221,14 +246,53 @@
                 )}
               </div>
             )}
-            
-            {/* ... items, memories, ai タブの中身は変更なし ... */}
-            {activeTab === 'items' && (<div className="max-w-xl mx-auto"><form onSubmit={handleAddItem} className="flex gap-2 mb-4"><input type="text" placeholder="持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3 text-sm" /><button type="submit" className="bg-blue-600 text-white px-5 rounded-lg font-bold text-sm">追加</button></form><div className="bg-white rounded-xl shadow-sm border overflow-hidden">{items.map(item => (<div key={item.id} onClick={() => toggleItem(item.id, item.is_checked)} className="flex items-center p-4 border-b cursor-pointer hover:bg-gray-50"><div className={`w-6 h-6 rounded-full flex items-center justify-center mr-3 border ${item.is_checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300'}`}>{item.is_checked && <i className="fa-solid fa-check text-xs"></i>}</div><span className={`flex-1 text-sm ${item.is_checked ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{item.name}</span></div>))}</div></div>)}
-            {activeTab === 'memories' && (<div className="max-w-xl mx-auto"><div className="text-center mb-6"><input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" /><button onClick={() => fileInputRef.current.click()} disabled={uploading} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg"><i className="fa-solid fa-camera mr-2"></i> {uploading ? 'アップロード中...' : '写真を追加'}</button></div><div className="grid grid-cols-2 md:grid-cols-3 gap-2">{memories.map(mem => (<div key={mem.id} onClick={() => setSelectedImage(mem.image_url)} className="aspect-square bg-gray-200 rounded-lg overflow-hidden cursor-pointer hover:opacity-80"><img src={mem.image_url} alt="思い出" className="w-full h-full object-cover" /></div>))}</div></div>)}
-            {activeTab === 'ai' && (<div className="max-w-xl mx-auto space-y-4"><div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm text-indigo-900 leading-relaxed">AIに相談してプランを作れます。</div><a href="https://gemini.google.com/app" target="_blank" className="block bg-white p-4 rounded-xl shadow-sm border text-center font-bold">Google Gemini を開く</a></div>)}
+
+            {/* 持ち物タブ */}
+            {activeTab === 'items' && (
+              <div className="max-w-xl mx-auto pb-6">
+                <form onSubmit={handleAddItem} className="flex gap-2 mb-4"><input type="text" placeholder="持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3 text-sm" /><button type="submit" className="bg-blue-600 text-white px-5 rounded-lg font-bold text-sm">追加</button></form>
+                <div className="bg-white rounded-xl shadow-sm border overflow-hidden">{items.map(item => (<div key={item.id} onClick={() => toggleItem(item.id, item.is_checked)} className="flex items-center p-4 border-b cursor-pointer hover:bg-gray-50"><div className={`w-6 h-6 rounded-full flex items-center justify-center mr-3 border ${item.is_checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300'}`}>{item.is_checked && <i className="fa-solid fa-check text-xs"></i>}</div><span className={`flex-1 text-sm ${item.is_checked ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{item.name}</span></div>))}</div>
+              </div>
+            )}
+
+            {/* 思い出タブ */}
+            {activeTab === 'memories' && (
+              <div className="max-w-xl mx-auto pb-6">
+                <div className="text-center mb-6"><input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" /><button onClick={() => fileInputRef.current.click()} disabled={uploading} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg"><i className="fa-solid fa-camera mr-2"></i> {uploading ? 'アップロード中...' : '写真を追加'}</button></div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">{memories.map(mem => (<div key={mem.id} onClick={() => setSelectedImage(mem.image_url)} className="aspect-square bg-gray-200 rounded-lg overflow-hidden cursor-pointer hover:opacity-80"><img src={mem.image_url} alt="思い出" className="w-full h-full object-cover" /></div>))}</div>
+              </div>
+            )}
+
+            {/* AI連携タブ（復元） */}
+            {activeTab === 'ai' && (
+              <div className="max-w-xl mx-auto space-y-4 pb-6">
+                <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm text-indigo-900 leading-relaxed">
+                  <h3 className="font-bold mb-2 flex items-center gap-2 text-indigo-700">
+                    <i className="fa-solid fa-lightbulb"></i> Geminiでプランを練る方法
+                  </h3>
+                  <ol className="list-decimal list-inside space-y-1 text-xs text-indigo-800">
+                    <li>Geminiを開いて旅行プランを相談する</li>
+                    <li>「指示文をコピー」を押してGeminiに送る</li>
+                    <li>返ってきたコードを一覧画面の「AIプラン取込」に貼るだけ！</li>
+                  </ol>
+                </div>
+                <div className="space-y-3">
+                  <button onClick={copyGeminiPrompt} className="w-full bg-indigo-600 text-white font-bold p-3 rounded-xl shadow hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+                    <i className="fa-solid fa-copy"></i> Gemini用の取り込み指示文をコピー
+                  </button>
+                  <a href="https://gemini.google.com/app" target="_blank" className="block bg-white p-4 rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition text-center flex items-center justify-center gap-3">
+                    <i className="fa-brands fa-google text-2xl text-blue-500"></i>
+                    <div className="text-left">
+                      <div className="font-bold text-gray-800">Google Gemini を開く</div>
+                      <div className="text-xs text-gray-500">相談・プラン作成はこちら</div>
+                    </div>
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* フローティングアクションボタン (FAB) */}
+          {/* フローティングアクションボタン */}
           {activeTab === 'schedule' && (
             <button 
               onClick={() => setShowAddModal(true)}
@@ -238,10 +302,10 @@
             </button>
           )}
 
-          {/* 予定追加ポップアップ（モーダル） */}
+          {/* 予定追加ポップアップ */}
           {showAddModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl animate-fade-in-up">
+              <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
                 <h3 className="font-bold text-gray-800 text-lg mb-4 flex items-center gap-2">
                   <i className="fa-solid fa-calendar-plus text-blue-600"></i> 新しい予定
                 </h3>
@@ -254,7 +318,6 @@
                   </div>
                   <input type="text" placeholder="場所・予定を入力" value={newSchedule.place} onChange={e => setNewSchedule({...newSchedule, place: e.target.value})} className="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none" required />
                   <textarea placeholder="メモ (チケット番号、持ち物、予約名など)" value={newSchedule.memo} onChange={e => setNewSchedule({...newSchedule, memo: e.target.value})} className="w-full border rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none bg-gray-50" rows="3"></textarea>
-                  
                   <div className="flex justify-end gap-3 pt-2">
                     <button type="button" onClick={() => setShowAddModal(false)} className="px-5 py-2.5 text-sm font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 rounded-xl transition">キャンセル</button>
                     <button type="submit" className="px-5 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md transition">保存する</button>
@@ -264,17 +327,26 @@
             </div>
           )}
 
+          {/* 画像ポップアップ */}
           {selectedImage && (<div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={() => setSelectedImage(null)}><img src={selectedImage} alt="拡大" className="max-w-full max-h-full object-contain" /><button className="absolute top-4 right-4 text-white text-3xl p-4"><i className="fa-solid fa-xmark"></i></button></div>)}
         </div>
       );
     }
 
+    // ==========================================
+    // メイン（一覧画面 ＆ AIプラン取込の復元）
+    // ==========================================
     function App() {
       const [trips, setTrips] = useState([]);
       const [currentTrip, setCurrentTrip] = useState(null);
       
       const [newTripTitle, setNewTripTitle] = useState('');
       const [newTripDate, setNewTripDate] = useState('');
+
+      // AI取り込み用のステート（復元）
+      const [showImportModal, setShowImportModal] = useState(false);
+      const [importDataText, setImportDataText] = useState('');
+      const [isImporting, setIsImporting] = useState(false);
 
       useEffect(() => { fetchTrips(); }, []);
 
@@ -292,13 +364,81 @@
         fetchTrips();
       };
 
+      // AIデータのインポート処理（memoにも対応！）
+      const handleImportPlan = async () => {
+        if (!importDataText.trim()) return;
+        setIsImporting(true);
+
+        try {
+          const jsonMatch = importDataText.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) throw new Error('有効なデータが見つかりませんでした。');
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (!parsed.title) throw new Error('旅行タイトルが含まれていません。');
+
+          const { data: tripData, error: tripErr } = await supabase
+            .from('trips')
+            .insert([{ title: parsed.title, start_date: newTripDate || null }]) // 入力された出発日があれば一緒に登録
+            .select()
+            .single();
+
+          if (tripErr) throw tripErr;
+
+          const tripId = tripData.id;
+
+          if (parsed.schedules && parsed.schedules.length > 0) {
+            const scheduleRecords = parsed.schedules.map(s => ({
+              trip_id: tripId,
+              day: Number(s.day) || 1,
+              time: s.time || '',
+              place: s.place || '',
+              memo: s.memo || '' // AIからのメモも取り込む
+            }));
+            await supabase.from('schedules').insert(scheduleRecords);
+          }
+
+          if (parsed.items && parsed.items.length > 0) {
+            const itemRecords = parsed.items.map(name => ({
+              trip_id: tripId,
+              name: typeof name === 'string' ? name : (name.name || ''),
+              is_checked: false
+            }));
+            await supabase.from('items').insert(itemRecords);
+          }
+
+          alert(`「${parsed.title}」のしおりを作成しました！`);
+          setImportDataText('');
+          setShowImportModal(false);
+          await fetchTrips();
+          setCurrentTrip(tripData);
+        } catch (err) {
+          alert('取り込みに失敗しました: ' + err.message);
+        } finally {
+          setIsImporting(false);
+        }
+      };
+
+      const copyGeminiPrompt = () => {
+        navigator.clipboard.writeText(GEMINI_PROMPT_TEMPLATE);
+        alert('Geminiへの指示文をコピーしました！Geminiに送ってください。');
+      };
+
       if (currentTrip) return <TripDetail trip={currentTrip} onBack={() => setCurrentTrip(null)} />;
 
       return (
         <div className="max-w-4xl mx-auto p-4 md:p-8">
-          <h1 className="text-2xl font-bold text-gray-800 mb-8"><i className="fa-solid fa-plane-departure text-blue-600 mr-2"></i> 家族の旅行一覧</h1>
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="text-2xl font-bold text-gray-800">
+              <i className="fa-solid fa-plane-departure text-blue-600 mr-2"></i> 家族の旅行一覧
+            </h1>
+            {/* AIプラン取込ボタン（復元） */}
+            <button 
+              onClick={() => setShowImportModal(true)} 
+              className="bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl shadow hover:bg-indigo-700 transition flex items-center gap-2"
+            >
+              <i className="fa-solid fa-wand-magic-sparkles"></i> AIプラン取込
+            </button>
+          </div>
           
-          {/* 旅行追加フォーム（日付入力欄を追加） */}
           <form onSubmit={addTrip} className="bg-white p-5 rounded-xl shadow-sm mb-8 flex flex-col sm:flex-row gap-3">
             <input type="text" placeholder="旅行のタイトル (例: 沖縄旅行)" className="flex-1 border rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-blue-400" value={newTripTitle} onChange={e => setNewTripTitle(e.target.value)} required />
             <div className="flex gap-3">
@@ -316,6 +456,59 @@
               </div>
             ))}
           </div>
+
+          {/* AIプラン取り込みポップアップ（復元） */}
+          {showImportModal && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+                <div className="flex justify-between items-center shrink-0">
+                  <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    <i className="fa-solid fa-wand-magic-sparkles text-indigo-600"></i> AIプラン取り込み
+                  </h2>
+                  <button onClick={() => setShowImportModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">
+                    <i className="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-3 text-sm">
+                  <div className="bg-gray-50 border p-3 rounded-lg text-gray-600 space-y-2">
+                    <p className="font-bold text-gray-700">取り込み手順：</p>
+                    <ol className="list-decimal list-inside space-y-1 text-xs">
+                      <li>Geminiで旅行の相談をする</li>
+                      <li>下のボタンで指示文をコピーしてGeminiに送る</li>
+                      <li>Geminiが返したJSONコードを貼り付ける</li>
+                    </ol>
+                    <div className="pt-1 flex gap-2">
+                      <button onClick={copyGeminiPrompt} className="text-xs bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded hover:bg-indigo-200">
+                        <i className="fa-solid fa-copy mr-1"></i> 指示文をコピー
+                      </button>
+                      <a href="https://gemini.google.com/app" target="_blank" className="text-xs bg-gray-200 text-gray-700 font-bold px-3 py-1.5 rounded hover:bg-gray-300">
+                        Geminiを開く ↗
+                      </a>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Geminiの返答コードを貼り付け：</label>
+                    <textarea 
+                      rows="6" value={importDataText} onChange={e => setImportDataText(e.target.value)}
+                      placeholder='{"title": "沖縄3泊4日", "schedules": [{"day": 1, "time": "10:00", "place": "...", "memo": "..."}], ...}'
+                      className="w-full border rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-indigo-400 focus:outline-none"
+                    ></textarea>
+                  </div>
+                  {/* おまけ：出発日も一緒に設定できるようにしました */}
+                  <div>
+                     <label className="block text-xs font-bold text-gray-700 mb-1">出発日 (任意)：</label>
+                     <input type="date" value={newTripDate} onChange={e => setNewTripDate(e.target.value)} className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-400 focus:outline-none"/>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 shrink-0 pt-2 border-t">
+                  <button onClick={() => setShowImportModal(false)} className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg">キャンセル</button>
+                  <button onClick={handleImportPlan} disabled={isImporting || !importDataText.trim()} className="px-5 py-2 text-sm bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700 disabled:opacity-50">
+                    {isImporting ? '取り込み中...' : 'しおりを一括作成'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       );
     }
