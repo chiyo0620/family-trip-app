@@ -24,20 +24,34 @@
     const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     const { useState, useEffect, useRef } = React;
 
-    // Geminiに渡すフォーマット指示テンプレート
+    // 日ごとのテーマカラー定義（5日目以降はループ）
+    const DAY_THEMES = [
+      { badge: 'bg-blue-600 text-white', dot: 'bg-blue-500', line: 'border-blue-200', text: 'text-blue-600', light: 'bg-blue-50 border-blue-200' },
+      { badge: 'bg-emerald-600 text-white', dot: 'bg-emerald-500', line: 'border-emerald-200', text: 'text-emerald-600', light: 'bg-emerald-50 border-emerald-200' },
+      { badge: 'bg-amber-500 text-white', dot: 'bg-amber-500', line: 'border-amber-200', text: 'text-amber-600', light: 'bg-amber-50 border-amber-200' },
+      { badge: 'bg-purple-600 text-white', dot: 'bg-purple-500', line: 'border-purple-200', text: 'text-purple-600', light: 'bg-purple-50 border-purple-200' },
+      { badge: 'bg-rose-500 text-white', dot: 'bg-rose-500', line: 'border-rose-200', text: 'text-rose-600', light: 'bg-rose-50 border-rose-200' }
+    ];
+
+    const getDayTheme = (dayNum) => DAY_THEMES[(Math.max(1, dayNum) - 1) % DAY_THEMES.length];
+
+    // AIへの指示文（day対応版）
     const GEMINI_PROMPT_TEMPLATE = `これまでの旅行相談の内容をもとに、旅行しおりアプリに取り込むためのデータを出力してください。
-必ず以下のJSONフォーマットのみ（\`\`\`json などのマークダウンを含めてOK）を出力してください。前後の挨拶や補足文は不要です。
+必ず以下のJSONフォーマットのみを出力してください。前後の挨拶や補足文は不要です。
 
 {
-  "title": "旅行タイトル（例: 北海道3日間の旅）",
+  "title": "旅行タイトル（例: 沖縄3泊4日の家族旅行）",
   "schedules": [
-    {"time": "09:00", "place": "羽田空港出発"},
-    {"time": "12:00", "place": "新千歳空港でお昼ご飯"}
+    {"day": 1, "time": "10:00", "place": "那覇空港到着・レンタカー受取"},
+    {"day": 1, "time": "13:00", "place": "美ら海水族館見学"},
+    {"day": 2, "time": "09:30", "place": "古宇利大橋ドライブ"},
+    {"day": 3, "time": "11:00", "place": "国際通りでお土産探し"}
   ],
   "items": [
     "着替え",
-    "充電器",
-    "保険証"
+    "日焼け止め",
+    "保険証",
+    "スマホ充電器"
   ]
 }`;
 
@@ -51,13 +65,13 @@
       const [memories, setMemories] = useState([]);
       
       const [newItem, setNewItem] = useState('');
-      const [newSchedule, setNewSchedule] = useState({ time: '', place: '' });
+      const [newSchedule, setNewSchedule] = useState({ day: 1, time: '', place: '' });
       const [uploading, setUploading] = useState(false);
       const fileInputRef = useRef(null);
 
       const [selectedImage, setSelectedImage] = useState(null);
       const [editingScheduleId, setEditingScheduleId] = useState(null);
-      const [editScheduleData, setEditScheduleData] = useState({ time: '', place: '' });
+      const [editScheduleData, setEditScheduleData] = useState({ day: 1, time: '', place: '' });
 
       useEffect(() => {
         fetchData();
@@ -65,7 +79,12 @@
 
       const fetchData = async () => {
         if (activeTab === 'schedule') {
-          const { data } = await supabase.from('schedules').select('*').eq('trip_id', trip.id).order('time', { ascending: true });
+          const { data } = await supabase
+            .from('schedules')
+            .select('*')
+            .eq('trip_id', trip.id)
+            .order('day', { ascending: true })
+            .order('time', { ascending: true });
           setSchedules(data || []);
         } else if (activeTab === 'items') {
           const { data } = await supabase.from('items').select('*').eq('trip_id', trip.id).order('created_at', { ascending: true });
@@ -76,6 +95,7 @@
         }
       };
 
+      // --- 持ち物 ---
       const handleAddItem = async (e) => {
         e.preventDefault();
         if (!newItem) return;
@@ -89,11 +109,17 @@
         fetchData();
       };
 
+      // --- 日程表 ---
       const handleAddSchedule = async (e) => {
         e.preventDefault();
         if (!newSchedule.place) return;
-        await supabase.from('schedules').insert([{ trip_id: trip.id, ...newSchedule }]);
-        setNewSchedule({ time: '', place: '' });
+        await supabase.from('schedules').insert([{ 
+          trip_id: trip.id, 
+          day: Number(newSchedule.day) || 1,
+          time: newSchedule.time,
+          place: newSchedule.place 
+        }]);
+        setNewSchedule({ ...newSchedule, time: '', place: '' });
         fetchData();
       };
 
@@ -106,11 +132,16 @@
 
       const handleUpdateSchedule = async (id) => {
         if (!editScheduleData.place) return;
-        await supabase.from('schedules').update(editScheduleData).eq('id', id);
+        await supabase.from('schedules').update({
+          day: Number(editScheduleData.day) || 1,
+          time: editScheduleData.time,
+          place: editScheduleData.place
+        }).eq('id', id);
         setEditingScheduleId(null);
         fetchData();
       };
 
+      // --- 写真アップロード ---
       const handleImageUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -140,8 +171,16 @@
 
       const copyGeminiPrompt = () => {
         navigator.clipboard.writeText(GEMINI_PROMPT_TEMPLATE);
-        alert('Geminiへの指示文をコピーしました！Gemini画面に貼り付けて送信してください。');
+        alert('Geminiへの指示文をコピーしました！Geminiに送ってください。');
       };
+
+      // スケジュールを「day」ごとにグループ分け
+      const groupedSchedules = schedules.reduce((acc, sch) => {
+        const d = sch.day || 1;
+        if (!acc[d]) acc[d] = [];
+        acc[d].push(sch);
+        return acc;
+      }, {});
 
       return (
         <div className="max-w-4xl mx-auto bg-white h-[100dvh] flex flex-col shadow-xl">
@@ -165,68 +204,151 @@
           </div>
 
           <div className="flex-1 overflow-y-auto bg-gray-50 p-4">
+            
+            {/* 1. 日程タブ（日別カラー＆グループ表示） */}
             {activeTab === 'schedule' && (
-              <div className="max-w-xl mx-auto pb-6">
-                <form onSubmit={handleAddSchedule} className="bg-white p-4 rounded-xl shadow-sm flex gap-2 mb-6">
-                  <input type="time" value={newSchedule.time} onChange={e => setNewSchedule({...newSchedule, time: e.target.value})} className="border rounded p-2 text-sm" />
-                  <input type="text" placeholder="場所・予定" value={newSchedule.place} onChange={e => setNewSchedule({...newSchedule, place: e.target.value})} className="border rounded p-2 text-sm flex-1" required />
-                  <button type="submit" className="bg-blue-600 text-white px-4 rounded font-bold"><i className="fa-solid fa-plus"></i></button>
-                </form>
+              <div className="max-w-xl mx-auto pb-6 space-y-6">
                 
-                <div className="border-l-2 border-blue-200 ml-4 space-y-4">
-                  {schedules.map(sch => (
-                    <div key={sch.id} className="relative pl-6">
-                      <div className="absolute -left-[9px] top-4 w-4 h-4 rounded-full bg-blue-500 ring-4 ring-gray-50"></div>
-                      <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100">
-                        {editingScheduleId === sch.id ? (
-                          <div className="flex flex-col gap-2">
-                            <input type="time" value={editScheduleData.time} onChange={e => setEditScheduleData({...editScheduleData, time: e.target.value})} className="border rounded p-1" />
-                            <input type="text" value={editScheduleData.place} onChange={e => setEditScheduleData({...editScheduleData, place: e.target.value})} className="border rounded p-1" />
-                            <div className="flex justify-end gap-2 mt-2">
-                              <button onClick={() => setEditingScheduleId(null)} className="text-gray-500 px-3 py-1 bg-gray-100 rounded">キャンセル</button>
-                              <button onClick={() => handleUpdateSchedule(sch.id)} className="text-white px-3 py-1 bg-blue-600 rounded">保存</button>
+                {/* 予定追加フォーム */}
+                <form onSubmit={handleAddSchedule} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap gap-2">
+                  <div className="flex items-center gap-1 bg-gray-50 border rounded-lg px-2 py-1">
+                    <span className="text-xs text-gray-500 font-bold">第</span>
+                    <select 
+                      value={newSchedule.day} 
+                      onChange={e => setNewSchedule({...newSchedule, day: e.target.value})}
+                      className="bg-transparent font-bold text-sm focus:outline-none"
+                    >
+                      {[1,2,3,4,5,6,7].map(d => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs text-gray-500 font-bold">日</span>
+                  </div>
+                  <input 
+                    type="time" 
+                    value={newSchedule.time} 
+                    onChange={e => setNewSchedule({...newSchedule, time: e.target.value})} 
+                    className="border rounded-lg p-2 text-sm" 
+                  />
+                  <input 
+                    type="text" 
+                    placeholder="場所・予定を入力" 
+                    value={newSchedule.place} 
+                    onChange={e => setNewSchedule({...newSchedule, place: e.target.value})} 
+                    className="border rounded-lg p-2 text-sm flex-1 min-w-[140px]" 
+                    required 
+                  />
+                  <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold shadow hover:bg-blue-700">
+                    <i className="fa-solid fa-plus"></i>
+                  </button>
+                </form>
+
+                {/* 日別のタイムライン */}
+                {Object.keys(groupedSchedules).length > 0 ? (
+                  Object.keys(groupedSchedules).sort((a,b) => Number(a) - Number(b)).map(dayKey => {
+                    const dayNum = Number(dayKey);
+                    const theme = getDayTheme(dayNum);
+                    const daySchedules = groupedSchedules[dayKey];
+
+                    return (
+                      <div key={dayKey} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                        {/* 日付見出しバッジ */}
+                        <div className="flex items-center gap-2 mb-4 pb-2 border-b">
+                          <span className={`${theme.badge} text-xs font-bold px-3 py-1 rounded-full shadow-sm`}>
+                            {dayNum}日目
+                          </span>
+                          <span className="text-xs text-gray-400 font-bold">DAY {dayNum}</span>
+                        </div>
+
+                        {/* その日の予定一覧 */}
+                        <div className={`relative border-l-2 ${theme.line} ml-3 space-y-4`}>
+                          {daySchedules.map(sch => (
+                            <div key={sch.id} className="relative pl-5">
+                              {/* 日ごとに色の変わる丸マーカー */}
+                              <div className={`absolute -left-[7px] top-3.5 w-3 h-3 rounded-full ${theme.dot} ring-4 ring-white`}></div>
+                              
+                              <div className="bg-gray-50 hover:bg-gray-100 transition p-3 rounded-xl border border-gray-100">
+                                {editingScheduleId === sch.id ? (
+                                  <div className="flex flex-col gap-2">
+                                    <div className="flex gap-2">
+                                      <select 
+                                        value={editScheduleData.day} 
+                                        onChange={e => setEditScheduleData({...editScheduleData, day: e.target.value})}
+                                        className="border rounded p-1 text-xs"
+                                      >
+                                        {[1,2,3,4,5,6,7].map(d => (
+                                          <option key={d} value={d}>{d}日目</option>
+                                        ))}
+                                      </select>
+                                      <input 
+                                        type="time" 
+                                        value={editScheduleData.time} 
+                                        onChange={e => setEditScheduleData({...editScheduleData, time: e.target.value})} 
+                                        className="border rounded p-1 text-xs" 
+                                      />
+                                    </div>
+                                    <input 
+                                      type="text" 
+                                      value={editScheduleData.place} 
+                                      onChange={e => setEditScheduleData({...editScheduleData, place: e.target.value})} 
+                                      className="border rounded p-1 text-sm" 
+                                    />
+                                    <div className="flex justify-end gap-2 mt-1">
+                                      <button onClick={() => setEditingScheduleId(null)} className="text-xs text-gray-500 px-3 py-1 bg-white border rounded">キャンセル</button>
+                                      <button onClick={() => handleUpdateSchedule(sch.id)} className="text-xs text-white px-3 py-1 bg-blue-600 rounded font-bold">更新</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex justify-between items-start">
+                                    <div>
+                                      <span className={`${theme.text} font-bold text-xs`}>{sch.time || '時間未定'}</span>
+                                      <h3 className="font-bold text-gray-800 text-sm mt-0.5">{sch.place}</h3>
+                                    </div>
+                                    <div className="flex gap-3 text-gray-400 text-xs mt-1">
+                                      <button onClick={() => { setEditingScheduleId(sch.id); setEditScheduleData({ day: sch.day || 1, time: sch.time, place: sch.place }); }}>
+                                        <i className="fa-solid fa-pen hover:text-gray-600"></i>
+                                      </button>
+                                      <button onClick={() => deleteSchedule(sch.id)} className="hover:text-red-500">
+                                        <i className="fa-solid fa-trash"></i>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ) : (
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <span className="text-blue-600 font-bold text-sm">{sch.time || '時間未定'}</span>
-                              <h3 className="font-bold text-gray-800">{sch.place}</h3>
-                            </div>
-                            <div className="flex gap-3 text-gray-400">
-                              <button onClick={() => { setEditingScheduleId(sch.id); setEditScheduleData({ time: sch.time, place: sch.place }); }}><i className="fa-solid fa-pen"></i></button>
-                              <button onClick={() => deleteSchedule(sch.id)} className="hover:text-red-500"><i className="fa-solid fa-trash"></i></button>
-                            </div>
-                          </div>
-                        )}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                  {schedules.length === 0 && <p className="text-gray-400 text-center py-6">予定がありません</p>}
-                </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-gray-400 text-center py-10">予定がまだありません。<br/>上のフォームから追加してください。</p>
+                )}
               </div>
             )}
 
+            {/* 2. 持ち物タブ */}
             {activeTab === 'items' && (
               <div className="max-w-xl mx-auto space-y-4 pb-6">
                 <form onSubmit={handleAddItem} className="flex gap-2">
-                  <input type="text" placeholder="持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3" />
-                  <button type="submit" className="bg-blue-600 text-white px-4 rounded-lg font-bold">追加</button>
+                  <input type="text" placeholder="持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3 text-sm" />
+                  <button type="submit" className="bg-blue-600 text-white px-5 rounded-lg font-bold text-sm">追加</button>
                 </form>
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   {items.map(item => (
-                    <div key={item.id} onClick={() => toggleItem(item.id, item.is_checked)} className="flex items-center p-4 border-b cursor-pointer hover:bg-gray-50">
+                    <div key={item.id} onClick={() => toggleItem(item.id, item.is_checked)} className="flex items-center p-4 border-b last:border-b-0 cursor-pointer hover:bg-gray-50">
                       <div className={`w-6 h-6 rounded-full flex items-center justify-center mr-3 border ${item.is_checked ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300'}`}>
                         {item.is_checked && <i className="fa-solid fa-check text-xs"></i>}
                       </div>
-                      <span className={`flex-1 ${item.is_checked ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{item.name}</span>
+                      <span className={`flex-1 text-sm ${item.is_checked ? 'text-gray-400 line-through' : 'text-gray-800'}`}>{item.name}</span>
                     </div>
                   ))}
-                  {items.length === 0 && <p className="text-gray-400 text-center py-6">持ち物がありません</p>}
+                  {items.length === 0 && <p className="text-gray-400 text-center py-6 text-sm">持ち物がありません</p>}
                 </div>
               </div>
             )}
 
+            {/* 3. 思い出タブ */}
             {activeTab === 'memories' && (
               <div className="space-y-4 pb-6">
                 <div className="text-center mb-6">
@@ -245,7 +367,7 @@
               </div>
             )}
 
-            {/* AI連携タブ */}
+            {/* 4. AI連携タブ */}
             {activeTab === 'ai' && (
               <div className="max-w-xl mx-auto space-y-4 pb-6">
                 <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm text-indigo-900 leading-relaxed">
@@ -253,9 +375,9 @@
                     <i className="fa-solid fa-lightbulb"></i> Geminiでプランを練る方法
                   </h3>
                   <ol className="list-decimal list-inside space-y-1 text-xs text-indigo-800">
-                    <li>下のボタンからGeminiを開いて旅行プランを相談する</li>
-                    <li>プランが決まったら「取り込み指示文をコピー」を押してGeminiに送る</li>
-                    <li>返ってきたコードをホーム画面の「AIプラン取込」に貼るだけ！</li>
+                    <li>Geminiを開いて旅行プランを相談する</li>
+                    <li>「指示文をコピー」を押してGeminiに送る（1日目・2日目も自動判別！）</li>
+                    <li>返ってきたコードを一覧画面の「AIプラン取込」に貼るだけ！</li>
                   </ol>
                 </div>
 
@@ -287,7 +409,7 @@
     }
 
     // ==========================================
-    // メイン（一覧画面 ＆ AIインポートモーダル）
+    // メイン（一覧画面 ＆ AIプラン取込）
     // ==========================================
     function App() {
       const [trips, setTrips] = useState([]);
@@ -314,24 +436,16 @@
         fetchTrips();
       };
 
-      // AIデータ（JSON）の一括パース＆インポート処理
       const handleImportPlan = async () => {
         if (!importDataText.trim()) return;
         setIsImporting(true);
 
         try {
-          // マークダウンの ```json ... ``` を除去してJSON部分のみ抽出
           const jsonMatch = importDataText.match(/\{[\s\S]*\}/);
-          if (!jsonMatch) {
-            throw new Error('有効なデータが見つかりませんでした。');
-          }
+          if (!jsonMatch) throw new Error('有効なデータが見つかりませんでした。');
           const parsed = JSON.parse(jsonMatch[0]);
+          if (!parsed.title) throw new Error('旅行タイトルが含まれていません。');
 
-          if (!parsed.title) {
-            throw new Error('旅行タイトルが含まれていません。');
-          }
-
-          // 1. tripsテーブルに旅行を追加
           const { data: tripData, error: tripErr } = await supabase
             .from('trips')
             .insert([{ title: parsed.title }])
@@ -342,17 +456,18 @@
 
           const tripId = tripData.id;
 
-          // 2. schedulesテーブルに日程を一括追加
+          // 日程の一括登録（dayにも対応）
           if (parsed.schedules && parsed.schedules.length > 0) {
             const scheduleRecords = parsed.schedules.map(s => ({
               trip_id: tripId,
+              day: Number(s.day) || 1,
               time: s.time || '',
               place: s.place || ''
             }));
             await supabase.from('schedules').insert(scheduleRecords);
           }
 
-          // 3. itemsテーブルに持ち物を一括追加
+          // 持ち物の一括登録
           if (parsed.items && parsed.items.length > 0) {
             const itemRecords = parsed.items.map(name => ({
               trip_id: tripId,
@@ -366,7 +481,7 @@
           setImportDataText('');
           setShowImportModal(false);
           await fetchTrips();
-          setCurrentTrip(tripData); // 作成したしおりをそのまま開く
+          setCurrentTrip(tripData);
         } catch (err) {
           alert('取り込みに失敗しました: ' + err.message);
         } finally {
@@ -376,7 +491,7 @@
 
       const copyGeminiPrompt = () => {
         navigator.clipboard.writeText(GEMINI_PROMPT_TEMPLATE);
-        alert('Geminiへの指示文をコピーしました！Geminiに貼り付けてみてください。');
+        alert('Geminiへの指示文をコピーしました！Geminiに送ってください。');
       };
 
       if (currentTrip) return <TripDetail trip={currentTrip} onBack={() => setCurrentTrip(null)} />;
@@ -409,7 +524,6 @@
             ))}
           </div>
 
-          {/* AIプラン取り込みモーダル */}
           {showImportModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
@@ -426,9 +540,9 @@
                   <div className="bg-gray-50 border p-3 rounded-lg text-gray-600 space-y-2">
                     <p className="font-bold text-gray-700">取り込み手順：</p>
                     <ol className="list-decimal list-inside space-y-1 text-xs">
-                      <li>Geminiで旅行の相談を完了させる</li>
+                      <li>Geminiで旅行の相談をする</li>
                       <li>下のボタンで指示文をコピーしてGeminiに送る</li>
-                      <li>Geminiが返したコードを下の枠に貼り付ける</li>
+                      <li>Geminiが返したJSONコードを貼り付ける</li>
                     </ol>
                     <div className="pt-1 flex gap-2">
                       <button onClick={copyGeminiPrompt} className="text-xs bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded hover:bg-indigo-200">
@@ -441,12 +555,12 @@
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Geminiの返答を貼り付け：</label>
+                    <label className="block text-xs font-bold text-gray-700 mb-1">Geminiの返答コードを貼り付け：</label>
                     <textarea 
                       rows="6"
                       value={importDataText}
                       onChange={e => setImportDataText(e.target.value)}
-                      placeholder='{"title": "北海道3日間の旅", "schedules": [...], "items": [...]}'
+                      placeholder='{"title": "沖縄3泊4日", "schedules": [{"day": 1, "time": "10:00", "place": "..."}], ...}'
                       className="w-full border rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-indigo-400 focus:outline-none"
                     ></textarea>
                   </div>
