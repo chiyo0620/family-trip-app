@@ -7,7 +7,8 @@
 
   <link rel="icon" href="icon.png">
   <link rel="apple-touch-icon" href="icon.png">
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- 警告が出ていたメタタグを最新のものに修正しました -->
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="旅行しおり">
 
@@ -22,6 +23,9 @@
   <div id="root"></div>
 
   <script type="text/babel">
+    // ==========================================
+    // 🔑 Supabaseの接続情報
+    // ==========================================
     const SUPABASE_URL = 'https://xankyyjojztzubhvrfwx.supabase.co';
     const SUPABASE_KEY ='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhhbmt5eWpvanp0enViaHZyZnd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwOTczMjQsImV4cCI6MjEwODY3MzMyNH0.XhjVO7tibCwP9T0RFsPYP5iBLKkx0X3ebxBqnYSIkFM';
 
@@ -47,7 +51,6 @@
       return `${month}/${day}(${weekdays[date.getDay()]})`;
     };
 
-    // ①【新規作成用】の指示文（出発日が入力されていればAIに伝える）
     const getNewPrompt = (startDate) => `これまでの旅行相談の内容をもとに、旅行しおりアプリに取り込むためのデータを出力してください。
 ${startDate ? `【重要】旅行の1日目（出発日）は「${startDate}」です。この日付を基準に考えてください。\n` : ''}
 必ず以下のJSONフォーマットのみを出力してください。前後の挨拶や補足文は不要です。
@@ -63,7 +66,6 @@ ${startDate ? `【重要】旅行の1日目（出発日）は「${startDate}」�
   ]
 }`;
 
-    // ②【後から追加用】の指示文（★出発日を基準にした日数計算の指示を追加！）
     const getAddPrompt = (startDate) => `提供する情報（予約メール本文やスクショなど）をもとに、旅行しおりアプリに後から追加するためのデータを出力してください。
 ${startDate ? `【重要】この旅行の1日目（出発日）は「${startDate}」です。提供されたメールやスクショの日付（例：11月22日）が、この出発日を基準に「何日目(day)」にあたるかを正確に計算し、"day" の数値に反映してください。\n` : ''}
 必ず以下のJSONフォーマットのみを出力してください。前後の挨拶や補足文は不要です。
@@ -122,6 +124,7 @@ ${startDate ? `【重要】この旅行の1日目（出発日）は「${startDat
         setNewItem('');
         fetchData();
       };
+      
       const toggleItem = async (id, currentStatus) => {
         await supabase.from('items').update({ is_checked: !currentStatus }).eq('id', id);
         fetchData();
@@ -506,7 +509,12 @@ ${startDate ? `【重要】この旅行の1日目（出発日）は「${startDat
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {trips.map(trip => (
-              <div key={trip.id} className="bg-white rounded-xl shadow-sm border-l-4 border-blue-500 hover:shadow-md transition relative group overflow-hidden">
+              <div 
+                key={trip.id} 
+                onClick={() => setCurrentTrip(trip)} 
+                className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 hover:shadow-md transition relative group overflow-hidden cursor-pointer"
+              >
+                {/* 🗑️ ゴミ箱ボタン（e.stopPropagation() でここだけ独立させています） */}
                 <button 
                   onClick={(e) => deleteTrip(e, trip.id, trip.title)} 
                   className="absolute top-3 right-3 z-10 text-gray-300 hover:text-red-500 w-10 h-10 flex items-center justify-center transition-colors rounded-full hover:bg-red-50" 
@@ -514,15 +522,15 @@ ${startDate ? `【重要】この旅行の1日目（出発日）は「${startDat
                 >
                   <i className="fa-solid fa-trash text-lg"></i>
                 </button>
-                <div onClick={() => setCurrentTrip(trip)} className="p-6 cursor-pointer">
-                  <h2 className="text-xl font-bold mb-1 pr-12">{trip.title}</h2>
-                  {trip.start_date && (
-                    <p className="text-sm text-gray-500 mb-2">
-                      <i className="fa-regular fa-calendar mr-1"></i>{trip.start_date} 出発
-                    </p>
-                  )}
-                  <div className="mt-4 text-right text-blue-600 text-sm font-bold">しおりを開く →</div>
-                </div>
+
+                {/* カードの中身全体がタップ判定になります */}
+                <h2 className="text-xl font-bold mb-1 pr-12">{trip.title}</h2>
+                {trip.start_date && (
+                  <p className="text-sm text-gray-500 mb-2">
+                    <i className="fa-regular fa-calendar mr-1"></i>{trip.start_date} 出発
+                  </p>
+                )}
+                <div className="mt-4 text-right text-blue-600 text-sm font-bold">しおりを開く →</div>
               </div>
             ))}
           </div>
