@@ -62,7 +62,7 @@
   ]
 }`;
 
-    // ②【後から追加用】の指示文（しおり詳細画面で使う用）★新規追加
+    // ②【後から追加用】の指示文（しおり詳細画面で使う用）
     const GEMINI_PROMPT_ADD = `提供する情報（予約メール本文やスクショなど）をもとに、旅行しおりアプリに後から追加するためのデータを出力してください。
 必ず以下のJSONフォーマットのみを出力してください。前後の挨拶や補足文は不要です。
 
@@ -95,7 +95,6 @@
       const [editingScheduleId, setEditingScheduleId] = useState(null);
       const [editScheduleData, setEditScheduleData] = useState({ day: 1, time: '', place: '', memo: '' });
 
-      // ★追加取り込み用のステート
       const [importAddText, setImportAddText] = useState('');
       const [isImportingAdd, setIsImportingAdd] = useState(false);
 
@@ -175,7 +174,6 @@
         }
       };
 
-      // ★既存のしおりにAIデータをマージ（追加）する処理
       const handleImportAddPlan = async () => {
         if (!importAddText.trim()) return;
         setIsImportingAdd(true);
@@ -206,7 +204,7 @@
 
           alert(`予定を${addedSchedules}件、持ち物を${addedItems}件追加しました！\n日程・持ち物タブで確認してください。`);
           setImportAddText('');
-          fetchData(); // 画面を更新
+          fetchData();
         } catch (err) {
           alert('追加に失敗しました: ' + err.message);
         } finally {
@@ -302,7 +300,6 @@
               </div>
             )}
 
-            {/* 持ち物タブ */}
             {activeTab === 'items' && (
               <div className="max-w-xl mx-auto pb-6">
                 <form onSubmit={handleAddItem} className="flex gap-2 mb-4"><input type="text" placeholder="持ち物を追加" value={newItem} onChange={e => setNewItem(e.target.value)} className="flex-1 border rounded-lg px-4 py-3 text-sm" /><button type="submit" className="bg-blue-600 text-white px-5 rounded-lg font-bold text-sm">追加</button></form>
@@ -310,7 +307,6 @@
               </div>
             )}
 
-            {/* 思い出タブ */}
             {activeTab === 'memories' && (
               <div className="max-w-xl mx-auto pb-6">
                 <div className="text-center mb-6"><input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" /><button onClick={() => fileInputRef.current.click()} disabled={uploading} className="bg-blue-600 text-white px-6 py-3 rounded-full font-bold shadow-lg"><i className="fa-solid fa-camera mr-2"></i> {uploading ? 'アップロード中...' : '写真を追加'}</button></div>
@@ -318,7 +314,6 @@
               </div>
             )}
 
-            {/* ★AI連携タブ（予約メールやスクショの取り込み特化にリニューアル） */}
             {activeTab === 'ai' && (
               <div className="max-w-xl mx-auto space-y-6 pb-6">
                 <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm text-indigo-900 leading-relaxed">
@@ -340,7 +335,6 @@
                     </a>
                   </div>
                 </div>
-
                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-3">
                   <label className="block text-sm font-bold text-gray-800">
                     <i className="fa-solid fa-file-import text-blue-500 mr-1"></i> 追加データを取り込む
@@ -364,7 +358,6 @@
             )}
           </div>
 
-          {/* フローティングアクションボタン */}
           {activeTab === 'schedule' && (
             <button 
               onClick={() => setShowAddModal(true)}
@@ -374,7 +367,6 @@
             </button>
           )}
 
-          {/* 予定追加ポップアップ */}
           {showAddModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
@@ -399,7 +391,6 @@
             </div>
           )}
 
-          {/* 画像ポップアップ */}
           {selectedImage && (<div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={() => setSelectedImage(null)}><img src={selectedImage} alt="拡大" className="max-w-full max-h-full object-contain" /><button className="absolute top-4 right-4 text-white text-3xl p-4"><i className="fa-solid fa-xmark"></i></button></div>)}
         </div>
       );
@@ -437,17 +428,15 @@
 
       const deleteTrip = async (e, tripId, tripTitle) => {
         e.stopPropagation();
-        if (!confirm(`「${tripTitle}」を完全に削除しますか？\n※この操作は取り消せません。中の予定や持ち物、写真もすべて削除されます。`)) return;
-
+        if (!confirm(`「${tripTitle}」を完全に削除しますか？\n※この操作は取り消せません。`)) return;
         try {
           await supabase.from('schedules').delete().eq('trip_id', tripId);
           await supabase.from('items').delete().eq('trip_id', tripId);
           await supabase.from('memories').delete().eq('trip_id', tripId);
-          const { error } = await supabase.from('trips').delete().eq('id', tripId);
-          if (error) throw error;
+          await supabase.from('trips').delete().eq('id', tripId);
           fetchTrips();
         } catch (err) {
-          alert('削除中にエラーが発生しました: ' + err.message);
+          alert('削除エラー: ' + err.message);
         }
       };
 
@@ -473,17 +462,24 @@
             await supabase.from('items').insert(itemRecords);
           }
 
-          alert(`「${parsed.title}」のしおりを作成しました！`);
+          alert(`「${parsed.title}」を作成しました！`);
           setImportDataText('');
           setShowImportModal(false);
           await fetchTrips();
           setCurrentTrip(tripData);
         } catch (err) {
-          alert('取り込みに失敗しました: ' + err.message);
+          alert('エラー: ' + err.message);
         } finally {
           setIsImporting(false);
         }
       };
+
+      const copyGeminiPromptNew = () => {
+        navigator.clipboard.writeText(GEMINI_PROMPT_NEW);
+        alert('新規作成用の指示文をコピーしました！Geminiに送ってください。');
+      };
+
+      if (currentTrip) return <TripDetail trip={currentTrip} onBack={() => setCurrentTrip(null)} />;
 
       return (
         <div className="max-w-4xl mx-auto p-4 md:p-8">
@@ -509,17 +505,26 @@
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {trips.map(trip => (
-              <div key={trip.id} onClick={() => setCurrentTrip(trip)} className="bg-white p-6 rounded-xl shadow-sm border-l-4 border-blue-500 cursor-pointer hover:shadow-md transition relative group">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h2 className="text-xl font-bold mb-1 pr-8">{trip.title}</h2>
-                    {trip.start_date && <p className="text-sm text-gray-500 mb-2"><i className="fa-regular fa-calendar mr-1"></i>{trip.start_date} 出発</p>}
-                  </div>
-                  <button onClick={(e) => deleteTrip(e, trip.id, trip.title)} className="absolute top-4 right-4 text-gray-300 hover:text-red-500 p-2 transition-colors rounded-full hover:bg-red-50" title="旅行を削除">
-                    <i className="fa-solid fa-trash"></i>
-                  </button>
+              <div key={trip.id} className="bg-white rounded-xl shadow-sm border-l-4 border-blue-500 hover:shadow-md transition relative group overflow-hidden">
+                {/* 🗑️ ゴミ箱ボタン（クリック領域を完全に独立させました） */}
+                <button 
+                  onClick={(e) => deleteTrip(e, trip.id, trip.title)} 
+                  className="absolute top-3 right-3 z-10 text-gray-300 hover:text-red-500 w-10 h-10 flex items-center justify-center transition-colors rounded-full hover:bg-red-50" 
+                  title="旅行を削除"
+                >
+                  <i className="fa-solid fa-trash text-lg"></i>
+                </button>
+
+                {/* 📖 カード本体のクリックエリア */}
+                <div onClick={() => setCurrentTrip(trip)} className="p-6 cursor-pointer">
+                  <h2 className="text-xl font-bold mb-1 pr-12">{trip.title}</h2>
+                  {trip.start_date && (
+                    <p className="text-sm text-gray-500 mb-2">
+                      <i className="fa-regular fa-calendar mr-1"></i>{trip.start_date} 出発
+                    </p>
+                  )}
+                  <div className="mt-4 text-right text-blue-600 text-sm font-bold">しおりを開く →</div>
                 </div>
-                <div className="mt-2 text-right text-blue-600 text-sm font-bold">しおりを開く →</div>
               </div>
             ))}
           </div>
@@ -544,7 +549,7 @@
                       <li>Geminiが返したJSONコードを貼り付ける</li>
                     </ol>
                     <div className="pt-1 flex gap-2">
-                      <button onClick={() => { navigator.clipboard.writeText(GEMINI_PROMPT_NEW); alert('新規作成用の指示文をコピーしました！'); }} className="text-xs bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded hover:bg-indigo-200">
+                      <button onClick={copyGeminiPromptNew} className="text-xs bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded hover:bg-indigo-200">
                         <i className="fa-solid fa-copy mr-1"></i> 指示文をコピー
                       </button>
                       <a href="https://gemini.google.com/app" target="_blank" className="text-xs bg-gray-200 text-gray-700 font-bold px-3 py-1.5 rounded hover:bg-gray-300">
