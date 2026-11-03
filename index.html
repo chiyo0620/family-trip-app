@@ -224,18 +224,17 @@ ${startDate ? `【重要】この旅行の1日目（出発日）は「${startDat
 
       return (
         <div className="max-w-4xl mx-auto bg-white h-[100dvh] flex flex-col shadow-xl relative">
-          <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-4 flex items-center justify-between shrink-0">
-            <button onClick={onBack} className="hover:bg-white/20 p-2 rounded-full"><i className="fa-solid fa-chevron-left text-xl"></i></button>
+          <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white p-3 flex items-center justify-between shrink-0">
+            <button onClick={onBack} className="hover:bg-white/20 rounded-full"><i className="fa-solid fa-chevron-left text-xl"></i></button>
             <div className="text-center">
-              <h1 className="text-lg font-bold truncate leading-tight">{trip.title}</h1>
-              {trip.start_date && <div className="text-xs text-blue-100">{formatDate(trip.start_date, 1)}出発</div>}
+              <h1 className="text-lg font-bold truncate leading-tight">{trip.title}{trip.start_date && <span className="text-xs p-2 text-blue-100">{formatDate(trip.start_date, 1)}出発</span>}</h1>
             </div>
-            <button onClick={handleShare} className="hover:bg-white/20 p-2 rounded-full"><i className="fa-solid fa-share-nodes text-xl"></i></button>
+            <button onClick={handleShare} className="hover:bg-white/20 rounded-full"><i className="fa-solid fa-share-nodes text-xl"></i></button>
           </div>
 
           <div className="flex border-b text-sm font-medium bg-white shrink-0">
             {[{ id: 'schedule', icon: 'fa-calendar-days', label: '日程' }, { id: 'items', icon: 'fa-suitcase', label: '持ち物' }, { id: 'memories', icon: 'fa-image', label: '思い出' }, { id: 'ai', icon: 'fa-wand-magic-sparkles', label: 'AI連携' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-3 text-center transition ${activeTab === tab.id ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 py-1 text-center transition ${activeTab === tab.id ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>
                 <i className={`fa-solid ${tab.icon} block mb-1 text-lg`}></i>{tab.label}
               </button>
             ))}
@@ -505,7 +504,7 @@ ${startDate ? `【重要】この旅行の1日目（出発日）は「${startDat
           </div>
 
           {/* 🌟 カード全体をクリック可能に修正した部分 */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
             {trips.map(trip => (
               <div 
                 key={trip.id} 
