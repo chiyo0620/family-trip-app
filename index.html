@@ -47,8 +47,9 @@
       return `${month}/${day}(${weekdays[date.getDay()]})`;
     };
 
-    // ①【新規作成用】の指示文（一覧画面で使う用）
-    const GEMINI_PROMPT_NEW = `これまでの旅行相談の内容をもとに、旅行しおりアプリに取り込むためのデータを出力してください。
+    // ①【新規作成用】の指示文（出発日が入力されていればAIに伝える）
+    const getNewPrompt = (startDate) => `これまでの旅行相談の内容をもとに、旅行しおりアプリに取り込むためのデータを出力してください。
+${startDate ? `【重要】旅行の1日目（出発日）は「${startDate}」です。この日付を基準に考えてください。\n` : ''}
 必ず以下のJSONフォーマットのみを出力してください。前後の挨拶や補足文は不要です。
 
 {
@@ -62,13 +63,14 @@
   ]
 }`;
 
-    // ②【後から追加用】の指示文（しおり詳細画面で使う用）
-    const GEMINI_PROMPT_ADD = `提供する情報（予約メール本文やスクショなど）をもとに、旅行しおりアプリに後から追加するためのデータを出力してください。
+    // ②【後から追加用】の指示文（★出発日を基準にした日数計算の指示を追加！）
+    const getAddPrompt = (startDate) => `提供する情報（予約メール本文やスクショなど）をもとに、旅行しおりアプリに後から追加するためのデータを出力してください。
+${startDate ? `【重要】この旅行の1日目（出発日）は「${startDate}」です。提供されたメールやスクショの日付（例：11月22日）が、この出発日を基準に「何日目(day)」にあたるかを正確に計算し、"day" の数値に反映してください。\n` : ''}
 必ず以下のJSONフォーマットのみを出力してください。前後の挨拶や補足文は不要です。
 
 {
   "schedules": [
-    {"day": 1, "time": "15:00", "place": "〇〇ホテル チェックイン", "memo": "予約番号: 12345"}
+    {"day": 3, "time": "15:00", "place": "〇〇ホテル チェックイン", "memo": "予約番号: 12345"}
   ],
   "items": [
     "水着", "浮き輪"
@@ -327,7 +329,13 @@
                     <li>返ってきたコードを下の枠に貼り付けて取り込む</li>
                   </ol>
                   <div className="mt-3 flex gap-2">
-                    <button onClick={() => { navigator.clipboard.writeText(GEMINI_PROMPT_ADD); alert('追加用の指示文をコピーしました！\nGeminiに送ってください。'); }} className="text-xs bg-indigo-600 text-white font-bold px-3 py-2.5 rounded-lg shadow hover:bg-indigo-700 flex-1 flex items-center justify-center gap-1 transition">
+                    <button 
+                      onClick={() => { 
+                        navigator.clipboard.writeText(getAddPrompt(trip.start_date)); 
+                        alert('追加用の指示文をコピーしました！\n「出発日を基準にした日数計算」の指示も含まれています。'); 
+                      }} 
+                      className="text-xs bg-indigo-600 text-white font-bold px-3 py-2.5 rounded-lg shadow hover:bg-indigo-700 flex-1 flex items-center justify-center gap-1 transition"
+                    >
                       <i className="fa-solid fa-copy"></i> 指示文コピー
                     </button>
                     <a href="https://gemini.google.com/app" target="_blank" className="text-xs bg-white border border-indigo-200 text-indigo-700 font-bold px-3 py-2.5 rounded-lg hover:bg-indigo-100 flex-1 flex items-center justify-center gap-1 transition text-center">
@@ -343,7 +351,7 @@
                     rows="5" 
                     value={importAddText} 
                     onChange={e => setImportAddText(e.target.value)}
-                    placeholder='{"schedules": [{"day": 1, "time": "15:00", "place": "ホテル"}], ...}'
+                    placeholder='{"schedules": [{"day": 3, "time": "15:00", "place": "ホテル"}], ...}'
                     className="w-full border rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-blue-400 focus:outline-none bg-gray-50"
                   ></textarea>
                   <button 
@@ -474,13 +482,6 @@
         }
       };
 
-      const copyGeminiPromptNew = () => {
-        navigator.clipboard.writeText(GEMINI_PROMPT_NEW);
-        alert('新規作成用の指示文をコピーしました！Geminiに送ってください。');
-      };
-
-      if (currentTrip) return <TripDetail trip={currentTrip} onBack={() => setCurrentTrip(null)} />;
-
       return (
         <div className="max-w-4xl mx-auto p-4 md:p-8">
           <div className="flex items-center justify-between mb-8">
@@ -506,7 +507,6 @@
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {trips.map(trip => (
               <div key={trip.id} className="bg-white rounded-xl shadow-sm border-l-4 border-blue-500 hover:shadow-md transition relative group overflow-hidden">
-                {/* 🗑️ ゴミ箱ボタン（クリック領域を完全に独立させました） */}
                 <button 
                   onClick={(e) => deleteTrip(e, trip.id, trip.title)} 
                   className="absolute top-3 right-3 z-10 text-gray-300 hover:text-red-500 w-10 h-10 flex items-center justify-center transition-colors rounded-full hover:bg-red-50" 
@@ -514,8 +514,6 @@
                 >
                   <i className="fa-solid fa-trash text-lg"></i>
                 </button>
-
-                {/* 📖 カード本体のクリックエリア */}
                 <div onClick={() => setCurrentTrip(trip)} className="p-6 cursor-pointer">
                   <h2 className="text-xl font-bold mb-1 pr-12">{trip.title}</h2>
                   {trip.start_date && (
@@ -529,7 +527,6 @@
             ))}
           </div>
 
-          {/* 新規作成用のAIプラン取り込みポップアップ */}
           {showImportModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
@@ -549,7 +546,7 @@
                       <li>Geminiが返したJSONコードを貼り付ける</li>
                     </ol>
                     <div className="pt-1 flex gap-2">
-                      <button onClick={copyGeminiPromptNew} className="text-xs bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded hover:bg-indigo-200">
+                      <button onClick={() => { navigator.clipboard.writeText(getNewPrompt(newTripDate)); alert('新規作成用の指示文をコピーしました！\n出発日の情報も含まれています。'); }} className="text-xs bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded hover:bg-indigo-200">
                         <i className="fa-solid fa-copy mr-1"></i> 指示文をコピー
                       </button>
                       <a href="https://gemini.google.com/app" target="_blank" className="text-xs bg-gray-200 text-gray-700 font-bold px-3 py-1.5 rounded hover:bg-gray-300">
