@@ -500,17 +500,9 @@ ${startDate ? `【重要】この旅行の1日目（出発日）は「${startDat
               onClick={() => setShowImportModal(true)} 
               className="bg-indigo-600 text-white text-sm font-bold px-4 py-2 rounded-xl shadow hover:bg-indigo-700 transition flex items-center gap-2"
             >
-              <i className="fa-solid fa-wand-magic-sparkles"></i> AIプラン新規作成
+              <i className="fa-solid fa-wand-magic-sparkles"></i> AIプラン取込
             </button>
           </div>
-          
-          <form onSubmit={addTrip} className="bg-white p-5 rounded-xl shadow-sm mb-8 flex flex-col sm:flex-row gap-3">
-            <input type="text" placeholder="旅行のタイトル (例: 沖縄旅行)" className="flex-1 border rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-blue-400" value={newTripTitle} onChange={e => setNewTripTitle(e.target.value)} required />
-            <div className="flex gap-3">
-              <input type="date" className="border rounded-lg px-4 py-3 text-sm text-gray-600 focus:ring-2 focus:ring-blue-400" value={newTripDate} onChange={e => setNewTripDate(e.target.value)} title="出発日" />
-              <button type="submit" className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold shadow hover:bg-blue-700 whitespace-nowrap">追加</button>
-            </div>
-          </form>
 
           {/* 🌟 カード全体をクリック可能に修正した部分 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -542,6 +534,14 @@ ${startDate ? `【重要】この旅行の1日目（出発日）は「${startDat
               </div>
             ))}
           </div>
+          
+          <form onSubmit={addTrip} className="bg-white p-5 rounded-xl shadow-sm mb-8 flex flex-col sm:flex-row gap-3">
+            <input type="text" placeholder="旅行のタイトル (例: 沖縄旅行)" className="flex-1 border rounded-lg px-4 py-3 text-sm focus:ring-2 focus:ring-blue-400" value={newTripTitle} onChange={e => setNewTripTitle(e.target.value)} required />
+            <div className="flex gap-3">
+              <input type="date" className="border rounded-lg px-4 py-3 text-sm text-gray-600 focus:ring-2 focus:ring-blue-400" value={newTripDate} onChange={e => setNewTripDate(e.target.value)} title="出発日" />
+              <button type="submit" className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold shadow hover:bg-blue-700 whitespace-nowrap">追加</button>
+            </div>
+          </form>
 
           {showImportModal && (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
